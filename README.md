@@ -1,94 +1,94 @@
 # Emby Subtitle Merger
 
-Plugin Emby pour fusionner deux sous-titres en un seul fichier SRT bilingue (dual subtitles).
+Emby plugin to merge two subtitles into a single bilingual SRT file (dual subtitles).
 
-## Fonctionnalites
+## Features
 
-- **Fusion de sous-titres** : Combinez deux sous-titres (ex: francais + anglais) en un seul fichier
-- **Support Films et Series** : Fonctionne avec les films et les episodes de series TV
-- **Filtres avances** : Filtrez par mediatheque, type (film/serie) et recherche textuelle
-- **Modes de fusion** :
-  - **Tous les sous-titres** : Fusionne l'integralite des deux fichiers
-  - **Chevauchement uniquement** : Ne garde que les sous-titres qui se chevauchent
-  - **Priorite langue 1** : Utilise la langue principale, complete avec la seconde
-- **Extraction automatique** : Extrait les sous-titres embarques dans les fichiers video (via ffmpeg)
-- **Support cloud** : Integration optionnelle avec DoubleSub.io API
-- **Interface moderne** : Interface utilisateur integree dans Emby
+- **Subtitle Merging**: Combine two subtitles (e.g., French + English) into a single file
+- **Movies & TV Shows Support**: Works with both movies and TV series episodes
+- **Advanced Filters**: Filter by library, media type (movie/episode), and text search
+- **Merge Modes**:
+  - **All subtitles**: Merges both files completely
+  - **Overlapping only**: Keeps only subtitles that overlap in time
+  - **Primary language priority**: Uses primary language, fills gaps with secondary
+- **Auto-extraction**: Automatically extracts embedded subtitles from video files (via ffmpeg)
+- **Cloud Support**: Optional integration with DoubleSub.io API
+- **Modern UI**: Built-in user interface integrated into Emby
 
 ## Installation
 
-### Telechargement
-1. Telechargez `EmbySubtitleMerger.dll` depuis les [Releases](../../releases)
-2. Copiez le fichier dans le dossier plugins d'Emby :
-   - **Windows** : `%ProgramData%\Emby-Server\plugins\`
-   - **Linux** : `/var/lib/emby/plugins/`
-   - **Docker** : `/config/plugins/`
-3. Redemarrez Emby Server
+### Download
+1. Download `EmbySubtitleMerger.dll` from [Releases](../../releases)
+2. Copy the file to Emby's plugin folder:
+   - **Windows**: `%ProgramData%\Emby-Server\plugins\`
+   - **Linux**: `/var/lib/emby/plugins/`
+   - **Docker**: `/config/plugins/`
+3. Restart Emby Server
 
-### Compilation depuis les sources
+### Build from Source
 ```bash
 cd ClassLibrary1
 dotnet build --configuration Release
 ```
-Le fichier `EmbySubtitleMerger.dll` sera genere dans `ClassLibrary1/bin/Release/net6.0/`
+The `EmbySubtitleMerger.dll` file will be generated in `ClassLibrary1/bin/Release/net6.0/`
 
-## Utilisation
+## Usage
 
-1. Allez dans **Parametres** > **Plugins** > **Subtitle Merger**
-2. Cliquez sur **Charger** pour lister vos medias
-3. Selectionnez un film ou episode
-4. Choisissez les deux sous-titres a fusionner
-5. Configurez les options (mode de fusion, tolerance, decalages)
-6. Cliquez sur **Fusionner**
+1. Go to **Settings** > **Plugins** > **Subtitle Merger**
+2. Click **Load** to list your media
+3. Select a movie or episode
+4. Choose the two subtitles to merge
+5. Configure options (merge mode, tolerance, offsets)
+6. Click **Merge**
 
-Le nouveau sous-titre sera cree dans le meme dossier que le fichier video.
+The new subtitle will be created in the same folder as the video file.
 
-## Options de fusion
+## Merge Options
 
 | Option | Description |
 |--------|-------------|
-| **Mode de fusion** | Comment combiner les sous-titres |
-| **Tolerance (ms)** | Marge pour considerer deux sous-titres comme simultanees |
-| **Decalage sous-titre 1** | Ajuster le timing du premier sous-titre (en ms) |
-| **Decalage sous-titre 2** | Ajuster le timing du second sous-titre (en ms) |
+| **Merge mode** | How to combine subtitles |
+| **Tolerance (ms)** | Margin to consider two subtitles as simultaneous |
+| **Subtitle 1 offset** | Adjust timing of first subtitle (in ms) |
+| **Subtitle 2 offset** | Adjust timing of second subtitle (in ms) |
 
-## Prerequis
+## Requirements
 
-- Emby Server 4.7+ (compatible .NET 6.0)
-- **ffmpeg** installe et accessible dans le PATH (pour l'extraction des sous-titres embarques)
+- Emby Server 4.7+ (.NET 6.0 compatible)
+- **ffmpeg** installed and available in PATH (for embedded subtitle extraction)
 
-## Structure du projet
+## Project Structure
 
 ```
 EmbySubtitleMerger/
 ├── ClassLibrary1/
-│   ├── Class1.cs                 # Plugin principal
-│   ├── SubtitleMergerPage.cs     # API endpoint de fusion
+│   ├── Class1.cs                 # Main plugin class
+│   ├── SubtitleMergerPage.cs     # Merge API endpoint
 │   ├── Configuration/
-│   │   ├── configPage.html       # Interface utilisateur
-│   │   └── configPage.js         # Logique JavaScript
+│   │   ├── configPage.html       # User interface
+│   │   └── configPage.js         # JavaScript logic
 │   └── Subtitles/
-│       ├── MergeService.cs       # Service de fusion
-│       ├── SrtParser.cs          # Parser de fichiers SRT
-│       ├── SubtitleMerger.cs     # Logique de fusion
-│       ├── FfmpegHelper.cs       # Extraction via ffmpeg
-│       └── DoubleSubApiClient.cs # Client API DoubleSub.io
+│       ├── MergeService.cs       # Merge service
+│       ├── SrtParser.cs          # SRT file parser
+│       ├── SubtitleMerger.cs     # Merge logic
+│       ├── FfmpegHelper.cs       # ffmpeg extraction
+│       └── DoubleSubApiClient.cs # DoubleSub.io API client
 └── README.md
 ```
 
 ## Changelog
 
 ### v8.6
-- Support des series TV (episodes)
-- Filtres par mediatheque et type de media
-- Recherche textuelle
-- Tri alphabetique des resultats
-- Rafraichissement automatique apres fusion
+- TV series support (episodes)
+- Filter by library and media type
+- Text search
+- Alphabetical sorting
+- Auto-refresh after merge
 
-## Licence
+## License
 
 MIT License
 
-## Auteur
+## Author
 
-Projet cree avec l'aide de Claude Code.
+Created with Claude Code.
