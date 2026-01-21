@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>Subtitle Merger</title>
+</head>
+<body>
+    <div id="subtitleMergerConfigPage" data-role="page" class="page type-interior pluginConfigurationPage"
+         data-require="emby-input,emby-button,emby-select,emby-checkbox"
+         data-controller="configurationpage?name=subtitlemerger.js">
+        <div data-role="content">
+            <div class="content-primary">
+                <h1>Subtitle Merger <span style="font-size:0.5em; color:#888;">v8.6</span></h1>
+
+                <style>
+                    .merger-card { background: rgba(0,0,0,0.2); border-radius: 8px; padding: 15px; margin-bottom: 15px; }
+                    .merger-card h3 { color: #00a4dc; margin: 0 0 10px 0; font-size: 1.1em; }
+                    .status-box { padding: 10px; border-radius: 5px; margin-bottom: 15px; }
+                    .status-ok { background: rgba(76,175,80,0.2); border-left: 3px solid #4CAF50; }
+                    .status-error { background: rgba(244,67,54,0.2); border-left: 3px solid #f44336; }
+                    .status-warning { background: rgba(255,152,0,0.2); border-left: 3px solid #ff9800; }
+                    .status-info { background: rgba(33,150,243,0.2); border-left: 3px solid #2196F3; }
+                    .merge-mode-toggle { display: flex; gap: 10px; margin-top: 10px; }
+                    .merge-mode-btn { flex: 1; padding: 12px; border: 2px solid #444; border-radius: 8px; background: rgba(0,0,0,0.3); cursor: pointer; text-align: center; transition: all 0.2s; }
+                    .merge-mode-btn:hover { border-color: #666; }
+                    .merge-mode-btn.active { border-color: #00a4dc; background: rgba(0,164,220,0.2); }
+                    .merge-mode-btn .mode-title { font-weight: bold; color: #e6eaf0; display: block; margin-bottom: 5px; }
+                    .merge-mode-btn .mode-desc { font-size: 0.85em; color: #9fb0c2; }
+                    .cloud-badge { background: #00a4dc; color: white; padding: 2px 6px; border-radius: 4px; font-size: 0.7em; margin-left: 5px; }
+                    .options-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; }
+                    .option-group { display: flex; flex-direction: column; gap: 5px; }
+                    .option-group label { color: #9fb0c2; font-size: 0.9em; }
+                    .option-group select, .option-group input[type="number"] { width: 100%; padding: 8px; border: 1px solid #444; border-radius: 5px; background: rgba(0,0,0,0.3); color: #e6eaf0; }
+                </style>
+
+                <!-- Info Section -->
+                <div id="movieInfo" class="status-box status-warning">Cliquez sur "Charger les films"</div>
+
+                <!-- Step 1: Load Movies -->
+                <div class="merger-card">
+                    <h3>1. Charger les medias</h3>
+                    <div style="display:flex; gap:10px; flex-wrap:wrap; align-items:center;">
+                        <button id="btnLoad" type="button" is="emby-button" class="raised button-submit">
+                            <span>Charger</span>
+                        </button>
+                        <select id="libraryFilter" is="emby-select" style="min-width:150px;">
+                            <option value="">Toutes les mediatheques</option>
+                        </select>
+                        <select id="typeFilter" is="emby-select" style="min-width:120px;">
+                            <option value="">Tous types</option>
+                            <option value="Movie">Films uniquement</option>
+                            <option value="Episode">Series uniquement</option>
+                        </select>
+                    </div>
+                </div>
+
+                <!-- Step 2: Select Movie -->
+                <div class="merger-card">
+                    <h3>2. Selectionner un film ou episode</h3>
+                    <input type="text" id="searchFilter" placeholder="Rechercher..." style="width:100%; padding:10px; margin-bottom:10px; border:1px solid #444; border-radius:5px; background:rgba(0,0,0,0.3); color:#e6eaf0;">
+                    <select id="moviesSelect" is="emby-select" style="width:100%; max-height:250px; overflow-y:auto; font-size:14px;">
+                        <option value="">-- Chargez d'abord --</option>
+                    </select>
+                    <div id="itemCount" style="margin-top:8px; color:#888; font-size:0.85em;"></div>
+                </div>
+
+                <!-- Step 3: Subtitles -->
+                <div id="subtitlesSection" class="merger-card" style="display:none;">
+                    <h3 style="display:flex; justify-content:space-between; align-items:center;">
+                        3. Sous-titres
+                        <button id="btnRefresh" type="button" is="emby-button" class="raised" style="padding:5px 10px; font-size:0.8em;">
+                            Recharger
+                        </button>
+                    </h3>
+                    <p style="color:#9fb0c2; font-size:0.85em; margin:0 0 10px 0;">
+                        <strong>Note:</strong> Si vous ajoutez/supprimez des sous-titres, allez dans <em>Mediatheque &gt; Actualiser les fichiers</em> d'abord, puis cliquez sur Recharger.
+                    </p>
+                    <div style="display:grid; grid-template-columns:1fr 1fr; gap:15px;">
+                        <div>
+                            <label style="color:#9fb0c2;">Sous-titre 1 (HAUT)</label>
+                            <select id="sub1" is="emby-select" style="width:100%;"><option value="">--</option></select>
+                        </div>
+                        <div>
+                            <label style="color:#9fb0c2;">Sous-titre 2 (BAS)</label>
+                            <select id="sub2" is="emby-select" style="width:100%;"><option value="">--</option></select>
+                        </div>
+                    </div>
+                    <div id="imageWarning" class="status-box status-warning" style="display:none; margin-top:15px;">
+                        <strong>Attention:</strong> Vous avez selectionne un sous-titre IMAGE (bitmap).<br>
+                        L'extraction sera tentee mais peut echouer. Si cela ne fonctionne pas, utilisez
+                        <a href="https://github.com/SubtitleEdit/subtitleedit" target="_blank" style="color:#00a4dc;">SubtitleEdit</a>
+                        pour convertir le sous-titre en SRT d'abord (OCR).
+                    </div>
+                </div>
+
+                <!-- Step 4: Options -->
+                <div id="optionsSection" class="merger-card" style="display:none;">
+                    <h3>4. Options de fusion</h3>
+                    <div class="options-grid">
+                        <div class="option-group">
+                            <label for="mergeMode">Mode de fusion:</label>
+                            <select id="mergeMode" is="emby-select">
+                                <option value="all">Tous les sous-titres</option>
+                                <option value="overlapping">Chevauchement uniquement</option>
+                                <option value="primary">Priorite langue 1</option>
+                            </select>
+                        </div>
+                        <div class="option-group">
+                            <label for="tolerance">Tolerance (ms):</label>
+                            <input type="number" id="tolerance" value="700" min="0" max="5000" step="100">
+                        </div>
+                        <div class="option-group">
+                            <label for="offset1">Decalage sous-titre 1 (ms):</label>
+                            <input type="number" id="offset1" value="0" step="100">
+                        </div>
+                        <div class="option-group">
+                            <label for="offset2">Decalage sous-titre 2 (ms):</label>
+                            <input type="number" id="offset2" value="0" step="100">
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Step 5: Merge Mode -->
+                <div id="mergeModeSection" class="merger-card" style="display:none;">
+                    <h3>5. Source de fusion</h3>
+                    <div class="merge-mode-toggle">
+                        <div id="modeLocal" class="merge-mode-btn active" data-mode="local">
+                            <span class="mode-title">Fusion locale</span>
+                            <span class="mode-desc">Rapide, traitement sur le serveur Emby</span>
+                        </div>
+                        <div id="modeCloud" class="merge-mode-btn" data-mode="cloud">
+                            <span class="mode-title">DoubleSub.io <span class="cloud-badge">Cloud</span></span>
+                            <span class="mode-desc">API cloud (cle requise)</span>
+                        </div>
+                    </div>
+                    <div id="apiKeySection" style="margin-top:15px; display:none;">
+                        <div class="option-group">
+                            <label for="apiKey">Cle API DoubleSub.io:</label>
+                            <input type="text" id="apiKey" placeholder="dsub_xxxxxxxxxxxxxxxx" style="width:100%; padding:8px; border:1px solid #444; border-radius:5px; background:rgba(0,0,0,0.3); color:#e6eaf0; font-family:monospace;">
+                        </div>
+                        <p style="color:#9fb0c2; font-size:0.8em; margin-top:8px;">
+                            Obtenez votre cle gratuite sur <a href="https://doublesub.io/api/v1/docs" target="_blank" style="color:#00a4dc;">doublesub.io/api/v1/docs</a> (50 fusions/jour)
+                        </p>
+                    </div>
+                    <div id="cloudStatus" class="status-box status-info" style="margin-top:10px; display:none;">
+                        Verification de DoubleSub.io...
+                    </div>
+                </div>
+
+                <!-- Step 6: Merge -->
+                <div id="mergeSection" class="merger-card" style="display:none;">
+                    <h3>6. Fusionner</h3>
+                    <button id="btnMerge" type="button" is="emby-button" class="raised button-submit">
+                        <span>Fusionner les sous-titres</span>
+                    </button>
+                </div>
+
+                <!-- Result -->
+                <div id="result"></div>
+            </div>
+        </div>
+    </div>
+</body>
+</html>

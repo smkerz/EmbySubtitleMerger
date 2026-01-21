@@ -1,0 +1,37 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Library</OutputType>
+    <TargetFramework>net6.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <AssemblyName>EmbySubtitleMerger</AssemblyName>
+    <RootNamespace>EmbySubtitleMerger</RootNamespace>
+    <Version>23.2.0</Version>
+    <AssemblyVersion>23.2.0.0</AssemblyVersion>
+    <FileVersion>23.2.0.0</FileVersion>
+  </PropertyGroup>
+  <ItemGroup>
+  </ItemGroup>
+  <ItemGroup>
+  </ItemGroup>
+
+  <ItemGroup>
+    <Reference Include="MediaBrowser.Common">
+      <HintPath>C:\Users\smk20\AppData\Roaming\Emby-Server\system\MediaBrowser.Common.dll</HintPath>
+    </Reference>
+    <Reference Include="MediaBrowser.Controller">
+      <HintPath>C:\Users\smk20\AppData\Roaming\Emby-Server\system\MediaBrowser.Controller.dll</HintPath>
+    </Reference>
+    <Reference Include="MediaBrowser.Model">
+      <HintPath>C:\Users\smk20\AppData\Roaming\Emby-Server\system\MediaBrowser.Model.dll</HintPath>
+    </Reference>
+  </ItemGroup>
+
+  <ItemGroup>
+    <EmbeddedResource Include="Configuration\configPage.html" />
+    <EmbeddedResource Include="Configuration\configPage.js" />
+    <EmbeddedResource Include="Configuration\subtitlePageInjector.js" />
+  </ItemGroup>
+
+</Project>
