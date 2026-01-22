@@ -2,6 +2,8 @@
 
 Emby plugin to merge two subtitles into a single bilingual SRT file (dual subtitles).
 
+<img width="213" height="513" alt="image" src="https://github.com/user-attachments/assets/04ef6a7e-f7f6-4295-b583-137868c4ef5f" />
+
 ## Features
 
 - **Subtitle Merging**: Combine two subtitles (e.g., French + English) into a single file
