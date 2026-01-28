@@ -1,7 +1,7 @@
 define([], function () {
     'use strict';
 
-    console.log('[SubMerger] Module loaded v8.6');
+    console.log('[SubMerger] Module loaded v8.7.1');
 
     var allMovies = [];      // Tous les medias charges
     var filteredMovies = []; // Medias filtres
@@ -199,12 +199,14 @@ define([], function () {
             var s = streams[i];
             if (s.Type === 'Subtitle') {
                 var isText = s.IsTextSubtitleStream;
+                var isExternal = s.IsExternal || false;
+                var subPath = s.Path || '';
                 var label = '#' + s.Index + ' ';
                 label += s.Language ? s.Language.toUpperCase() : 'UND';
                 label += ' (' + (s.Codec || '?') + ')';
-                label += s.IsExternal ? ' [EXT]' : ' [INT]';
+                label += isExternal ? ' [EXT]' : ' [INT]';
                 if (!isText) label += ' [IMAGE]';
-                subs.push({ index: s.Index, label: label, isText: isText });
+                subs.push({ index: s.Index, label: label, isText: isText, isExternal: isExternal, path: subPath });
             }
         }
 
@@ -219,12 +221,16 @@ define([], function () {
             o1.value = sub.index;
             o1.textContent = sub.label;
             o1.dataset.isText = sub.isText;
+            o1.dataset.isExternal = sub.isExternal;
+            o1.dataset.path = sub.path;
             s1.appendChild(o1);
 
             var o2 = document.createElement('option');
             o2.value = sub.index;
             o2.textContent = sub.label;
             o2.dataset.isText = sub.isText;
+            o2.dataset.isExternal = sub.isExternal;
+            o2.dataset.path = sub.path;
             s2.appendChild(o2);
         }
 
@@ -376,8 +382,10 @@ define([], function () {
     }
 
     function doMerge(view) {
-        var v1 = view.querySelector('#sub1').value;
-        var v2 = view.querySelector('#sub2').value;
+        var sub1El = view.querySelector('#sub1');
+        var sub2El = view.querySelector('#sub2');
+        var v1 = sub1El.value;
+        var v2 = sub2El.value;
         var result = view.querySelector('#result');
 
         if (!currentMovie || !v1 || !v2) {
@@ -388,6 +396,17 @@ define([], function () {
             error(view, 'Choisissez 2 sous-titres differents');
             return;
         }
+
+        // Recuperer les infos IsExternal et Path des sous-titres selectionnes
+        var sel1 = sub1El.options[sub1El.selectedIndex];
+        var sel2 = sub2El.options[sub2El.selectedIndex];
+        var sub1IsExternal = sel1.dataset.isExternal === 'true';
+        var sub1Path = sel1.dataset.path || '';
+        var sub2IsExternal = sel2.dataset.isExternal === 'true';
+        var sub2Path = sel2.dataset.path || '';
+
+        console.log('[SubMerger] Sub1: external=' + sub1IsExternal + ', path=' + sub1Path);
+        console.log('[SubMerger] Sub2: external=' + sub2IsExternal + ', path=' + sub2Path);
 
         var mergeMode = view.querySelector('#mergeMode').value;
         var tolerance = parseInt(view.querySelector('#tolerance').value) || 700;
@@ -426,6 +445,10 @@ define([], function () {
                 VideoPath: currentMovie.Path,
                 PrimaryIndex: parseInt(v1),
                 SecondaryIndex: parseInt(v2),
+                Primary1IsExternal: sub1IsExternal,
+                Primary1Path: sub1Path,
+                Primary2IsExternal: sub2IsExternal,
+                Primary2Path: sub2Path,
                 Mode: mergeMode,
                 ToleranceMs: tolerance,
                 Offset1Ms: offset1,
@@ -460,7 +483,7 @@ define([], function () {
     }
 
     return function (view) {
-        console.log('[SubMerger] Controller init v8.6');
+        console.log('[SubMerger] Controller init v8.7.1');
 
         view.addEventListener('viewshow', function () {
             console.log('[SubMerger] viewshow event');

@@ -23,6 +23,18 @@ namespace EmbySubtitleMerger.Subtitles
         /// <summary>Index du second sous-titre (bas)</summary>
         public int SecondaryIndex { get; set; }
 
+        /// <summary>Indique si le sous-titre 1 est externe (fichier séparé)</summary>
+        public bool Primary1IsExternal { get; set; } = false;
+
+        /// <summary>Chemin du fichier sous-titre 1 si externe</summary>
+        public string? Primary1Path { get; set; }
+
+        /// <summary>Indique si le sous-titre 2 est externe (fichier séparé)</summary>
+        public bool Primary2IsExternal { get; set; } = false;
+
+        /// <summary>Chemin du fichier sous-titre 2 si externe</summary>
+        public string? Primary2Path { get; set; }
+
         /// <summary>Mode de fusion: AllCues, OverlappingOnly, PrimaryPriority</summary>
         public string? Mode { get; set; }
 
@@ -125,7 +137,7 @@ namespace EmbySubtitleMerger.Subtitles
             {
                 FfmpegAvailable = ffmpegAvailable,
                 FfmpegVersion = ffmpegVersion,
-                PluginVersion = "5.0.0",
+                PluginVersion = "8.7.1",
                 CloudApiAvailable = cloudApiAvailable,
                 CloudApiUrl = DoubleSubApiClient.DefaultApiUrl
             };
@@ -254,39 +266,79 @@ namespace EmbySubtitleMerger.Subtitles
                 var tempDir = Path.Combine(Path.GetTempPath(), "EmbySubtitleMerger");
                 Directory.CreateDirectory(tempDir);
 
-                // Extraire le premier sous-titre
-                var primary1Path = Path.Combine(tempDir, $"{videoName}.sub1.srt");
-                var result1 = await FfmpegHelper.ExtractSubtitleByAbsoluteIndexAsync(
-                    request.VideoPath,
-                    request.PrimaryIndex,
-                    primary1Path);
-
-                if (!result1.Success)
+                // Obtenir le premier sous-titre (externe ou embarqué)
+                string primary1Path;
+                if (request.Primary1IsExternal && !string.IsNullOrEmpty(request.Primary1Path))
                 {
-                    return new MergeSubtitlesResponse
+                    // Sous-titre externe : utiliser directement le fichier
+                    primary1Path = request.Primary1Path;
+                    if (!File.Exists(primary1Path))
                     {
-                        Success = false,
-                        Error = $"Erreur extraction sous-titre 1: {result1.Error}"
-                    };
+                        return new MergeSubtitlesResponse
+                        {
+                            Success = false,
+                            Error = $"Fichier sous-titre 1 non trouvé: {primary1Path}"
+                        };
+                    }
+                }
+                else
+                {
+                    // Sous-titre embarqué : extraire avec FFmpeg
+                    primary1Path = Path.Combine(tempDir, $"{videoName}.sub1.srt");
+                    var result1 = await FfmpegHelper.ExtractSubtitleByAbsoluteIndexAsync(
+                        request.VideoPath,
+                        request.PrimaryIndex,
+                        primary1Path);
+
+                    if (!result1.Success)
+                    {
+                        return new MergeSubtitlesResponse
+                        {
+                            Success = false,
+                            Error = $"Erreur extraction sous-titre 1: {result1.Error}"
+                        };
+                    }
                 }
 
-                // Extraire le second sous-titre
-                var secondary2Path = Path.Combine(tempDir, $"{videoName}.sub2.srt");
-                var result2 = await FfmpegHelper.ExtractSubtitleByAbsoluteIndexAsync(
-                    request.VideoPath,
-                    request.SecondaryIndex,
-                    secondary2Path);
-
-                if (!result2.Success)
+                // Obtenir le second sous-titre (externe ou embarqué)
+                string secondary2Path;
+                if (request.Primary2IsExternal && !string.IsNullOrEmpty(request.Primary2Path))
                 {
-                    return new MergeSubtitlesResponse
+                    // Sous-titre externe : utiliser directement le fichier
+                    secondary2Path = request.Primary2Path;
+                    if (!File.Exists(secondary2Path))
                     {
-                        Success = false,
-                        Error = $"Erreur extraction sous-titre 2: {result2.Error}"
-                    };
+                        return new MergeSubtitlesResponse
+                        {
+                            Success = false,
+                            Error = $"Fichier sous-titre 2 non trouvé: {secondary2Path}"
+                        };
+                    }
+                }
+                else
+                {
+                    // Sous-titre embarqué : extraire avec FFmpeg
+                    secondary2Path = Path.Combine(tempDir, $"{videoName}.sub2.srt");
+                    var result2 = await FfmpegHelper.ExtractSubtitleByAbsoluteIndexAsync(
+                        request.VideoPath,
+                        request.SecondaryIndex,
+                        secondary2Path);
+
+                    if (!result2.Success)
+                    {
+                        return new MergeSubtitlesResponse
+                        {
+                            Success = false,
+                            Error = $"Erreur extraction sous-titre 2: {result2.Error}"
+                        };
+                    }
                 }
 
                 var outputPath = Path.Combine(videoDir, $"{videoName}.dual.srt");
+
+                // Déterminer quels fichiers sont temporaires (à nettoyer après)
+                bool sub1IsTemp = !request.Primary1IsExternal;
+                bool sub2IsTemp = !request.Primary2IsExternal;
 
                 // Choisir entre API cloud ou fusion locale
                 if (request.UseCloudApi)
@@ -310,7 +362,9 @@ namespace EmbySubtitleMerger.Subtitles
                         request.ToleranceMs ?? 700,
                         request.Color1,
                         request.Color2,
-                        request.DoubleSubApiKey);
+                        request.DoubleSubApiKey,
+                        sub1IsTemp,
+                        sub2IsTemp);
                 }
                 else
                 {
@@ -324,7 +378,9 @@ namespace EmbySubtitleMerger.Subtitles
                         request.Color1,
                         request.Color2,
                         request.Offset1Ms,
-                        request.Offset2Ms);
+                        request.Offset2Ms,
+                        sub1IsTemp,
+                        sub2IsTemp);
                 }
             }
             catch (Exception ex)
@@ -348,7 +404,9 @@ namespace EmbySubtitleMerger.Subtitles
             int toleranceMs,
             string? color1,
             string? color2,
-            string apiKey)
+            string apiKey,
+            bool srt1IsTemp = true,
+            bool srt2IsTemp = true)
         {
             try
             {
@@ -374,8 +432,9 @@ namespace EmbySubtitleMerger.Subtitles
                     color1,
                     color2);
 
-                // Nettoyer les fichiers temporaires
-                CleanupTempFiles(srt1Path, srt2Path);
+                // Nettoyer uniquement les fichiers temporaires (pas les externes!)
+                if (srt1IsTemp) CleanupTempFiles(srt1Path);
+                if (srt2IsTemp) CleanupTempFiles(srt2Path);
 
                 if (result.Success)
                 {
@@ -418,7 +477,9 @@ namespace EmbySubtitleMerger.Subtitles
             string? color1,
             string? color2,
             int offset1Ms = 0,
-            int offset2Ms = 0)
+            int offset2Ms = 0,
+            bool srt1IsTemp = true,
+            bool srt2IsTemp = true)
         {
             try
             {
@@ -469,8 +530,9 @@ namespace EmbySubtitleMerger.Subtitles
                 // Écrire le résultat
                 SrtParser.WriteFile(outputPath, merged);
 
-                // Nettoyer les fichiers temporaires
-                CleanupTempFiles(srt1Path, srt2Path);
+                // Nettoyer uniquement les fichiers temporaires (pas les externes!)
+                if (srt1IsTemp) CleanupTempFiles(srt1Path);
+                if (srt2IsTemp) CleanupTempFiles(srt2Path);
 
                 return Task.FromResult(new MergeSubtitlesResponse
                 {
