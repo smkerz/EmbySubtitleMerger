@@ -137,7 +137,7 @@ namespace EmbySubtitleMerger.Subtitles
             {
                 FfmpegAvailable = ffmpegAvailable,
                 FfmpegVersion = ffmpegVersion,
-                PluginVersion = "8.7.1",
+                PluginVersion = "8.9.0",
                 CloudApiAvailable = cloudApiAvailable,
                 CloudApiUrl = DoubleSubApiClient.DefaultApiUrl
             };

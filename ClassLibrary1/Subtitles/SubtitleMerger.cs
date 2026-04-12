@@ -68,31 +68,79 @@ namespace EmbySubtitleMerger.Subtitles
         }
         
         /// <summary>
+        /// Aligne les timings des sous-titres primaires et secondaires
+        /// pour éviter les micro-segments qui causent des sauts visuels.
+        /// Si un cue secondaire commence/finit proche d'un cue primaire (dans la tolérance),
+        /// on aligne les temps pour qu'ils soient synchronisés.
+        /// </summary>
+        private static void SnapTimings(
+            List<SubtitleCue> primary,
+            List<SubtitleCue> secondary,
+            long snapToleranceTicks)
+        {
+            foreach (var sCue in secondary)
+            {
+                foreach (var pCue in primary)
+                {
+                    // Aligner les débuts proches
+                    if (Math.Abs(sCue.StartTime.Ticks - pCue.StartTime.Ticks) <= snapToleranceTicks
+                        && sCue.StartTime != pCue.StartTime)
+                    {
+                        sCue.StartTime = pCue.StartTime;
+                    }
+
+                    // Aligner les fins proches
+                    if (Math.Abs(sCue.EndTime.Ticks - pCue.EndTime.Ticks) <= snapToleranceTicks
+                        && sCue.EndTime != pCue.EndTime)
+                    {
+                        sCue.EndTime = pCue.EndTime;
+                    }
+
+                    // Aligner début secondaire sur fin primaire (et inversement)
+                    if (Math.Abs(sCue.StartTime.Ticks - pCue.EndTime.Ticks) <= snapToleranceTicks
+                        && sCue.StartTime != pCue.EndTime)
+                    {
+                        sCue.StartTime = pCue.EndTime;
+                    }
+                    if (Math.Abs(sCue.EndTime.Ticks - pCue.StartTime.Ticks) <= snapToleranceTicks
+                        && sCue.EndTime != pCue.StartTime)
+                    {
+                        sCue.EndTime = pCue.StartTime;
+                    }
+                }
+            }
+        }
+
+        /// <summary>
         /// Fusionne tous les cues des deux sous-titres
         /// </summary>
         private static List<SubtitleCue> MergeAllCues(
-            List<SubtitleCue> primary, 
+            List<SubtitleCue> primary,
             List<SubtitleCue> secondary,
             MergeOptions options)
         {
             var result = new List<SubtitleCue>();
             var toleranceTicks = TimeSpan.FromMilliseconds(options.ToleranceMs).Ticks;
-            
+
+            // Aligner les timings proches pour éviter les micro-segments
+            // Utilise la moitié de la tolérance pour le snapping
+            SnapTimings(primary, secondary, toleranceTicks / 2);
+
             // Créer des événements pour tous les points de changement
             var events = new List<(TimeSpan Time, bool IsStart, bool IsPrimary, SubtitleCue Cue)>();
-            
+
             foreach (var cue in primary)
             {
                 events.Add((cue.StartTime, true, true, cue));
                 events.Add((cue.EndTime, false, true, cue));
             }
-            
+
             foreach (var cue in secondary)
             {
                 events.Add((cue.StartTime, true, false, cue));
                 events.Add((cue.EndTime, false, false, cue));
             }
-            
+
             // Trier par temps
             events = events.OrderBy(e => e.Time).ThenBy(e => e.IsStart ? 0 : 1).ToList();
             
@@ -153,12 +201,14 @@ namespace EmbySubtitleMerger.Subtitles
         /// Fusionne seulement les cues qui se chevauchent
         /// </summary>
         private static List<SubtitleCue> MergeOverlappingOnly(
-            List<SubtitleCue> primary, 
+            List<SubtitleCue> primary,
             List<SubtitleCue> secondary,
             MergeOptions options)
         {
             var result = new List<SubtitleCue>();
             var toleranceTicks = TimeSpan.FromMilliseconds(options.ToleranceMs).Ticks;
+
+            SnapTimings(primary, secondary, toleranceTicks / 2);
             
             foreach (var pCue in primary)
             {
@@ -191,12 +241,14 @@ namespace EmbySubtitleMerger.Subtitles
         /// Fusionne avec priorité au primaire
         /// </summary>
         private static List<SubtitleCue> MergePrimaryPriority(
-            List<SubtitleCue> primary, 
+            List<SubtitleCue> primary,
             List<SubtitleCue> secondary,
             MergeOptions options)
         {
             var result = new List<SubtitleCue>();
             var toleranceTicks = TimeSpan.FromMilliseconds(options.ToleranceMs).Ticks;
+
+            SnapTimings(primary, secondary, toleranceTicks / 2);
             
             // Ajouter tous les primaires
             foreach (var pCue in primary)

@@ -5,7 +5,7 @@
 (function() {
     'use strict';
 
-    console.log('[SubMerger] UI Injector loaded v1.0');
+    console.log('[SubMerger] UI Injector loaded v8.9.0');
 
     var INJECTOR_ID = 'subtitleMergerSection';
     var currentItemId = null;
@@ -256,7 +256,10 @@
             btn.textContent = 'Fusionner les sous-titres';
 
             if (data.Success) {
-                showResult(result, 'success', 'Fusion reussie! ' + data.CueCount + ' sous-titres crees');
+                showResult(result, 'success', 'Fusion reussie! ' + data.CueCount + ' sous-titres crees. Actualisation...');
+
+                // Rafraichir les metadonnees Emby pour detecter le nouveau sous-titre
+                refreshAndReload(item, result, data);
             } else {
                 showResult(result, 'error', 'Erreur: ' + data.Error);
             }
@@ -266,6 +269,93 @@
             btn.textContent = 'Fusionner les sous-titres';
             showResult(result, 'error', 'Erreur: ' + err.message);
         });
+    }
+
+    // Rafraichir les metadonnees Emby et recharger les sous-titres
+    function refreshAndReload(item, resultEl, mergeData) {
+        var apiClient = window.ApiClient;
+        if (!apiClient) return;
+
+        var apiKey = apiClient.accessToken();
+        var baseUrl = apiClient.serverAddress();
+        var itemId = currentItemId;
+
+        // Appeler l'API de refresh Emby avec FullRefresh pour forcer la detection du nouveau fichier
+        var refreshUrl = baseUrl + '/emby/Items/' + itemId + '/Refresh?Recursive=false&MetadataRefreshMode=FullRefresh&ImageRefreshMode=Default&ReplaceAllMetadata=false&ReplaceAllImages=false&api_key=' + apiKey;
+
+        console.log('[SubMerger] Refreshing item metadata:', itemId);
+
+        fetch(refreshUrl, { method: 'POST' })
+            .then(function() {
+                console.log('[SubMerger] Refresh triggered, waiting...');
+                // Attendre qu'Emby traite le refresh
+                return new Promise(function(resolve) {
+                    setTimeout(resolve, 4000);
+                });
+            })
+            .then(function() {
+                // Recharger les donnees de l'item pour mettre a jour la liste de sous-titres
+                var url = apiClient.getUrl('Items/' + itemId, {
+                    Fields: 'MediaStreams,Path'
+                });
+                return apiClient.getJSON(url);
+            })
+            .then(function(updatedItem) {
+                // Mettre a jour la liste de sous-titres dans les selects
+                subtitles = [];
+                var streams = updatedItem.MediaStreams || [];
+                for (var i = 0; i < streams.length; i++) {
+                    var s = streams[i];
+                    if (s.Type === 'Subtitle') {
+                        subtitles.push({
+                            index: s.Index,
+                            language: s.Language || 'und',
+                            codec: s.Codec || '?',
+                            isExternal: s.IsExternal,
+                            isText: s.IsTextSubtitleStream,
+                            title: s.Title || ''
+                        });
+                    }
+                }
+
+                // Mettre a jour les selects
+                updateSubtitleSelects();
+
+                showResult(resultEl, 'success', 'Fusion reussie! ' + mergeData.CueCount + ' sous-titres crees. Liste actualisee!');
+                console.log('[SubMerger] Subtitles reloaded:', subtitles.length);
+            })
+            .catch(function(err) {
+                console.error('[SubMerger] Refresh/reload error:', err);
+                showResult(resultEl, 'success', 'Fusion reussie! ' + mergeData.CueCount + ' sous-titres crees. Rechargez la page pour voir le nouveau sous-titre.');
+            });
+    }
+
+    // Mettre a jour les selects de sous-titres apres un reload
+    function updateSubtitleSelects() {
+        var sub1 = document.getElementById('mergeSub1');
+        var sub2 = document.getElementById('mergeSub2');
+        if (!sub1 || !sub2) return;
+
+        // Sauvegarder les selections actuelles
+        var val1 = sub1.value;
+        var val2 = sub2.value;
+
+        // Regenerer les options
+        var html = '<option value="">-- Choisir --</option>';
+        for (var i = 0; i < subtitles.length; i++) {
+            var s = subtitles[i];
+            var label = '#' + s.index + ' ' + s.language.toUpperCase() + ' (' + s.codec + ')';
+            label += s.isExternal ? ' [EXT]' : ' [INT]';
+            if (!s.isText) label += ' [IMAGE]';
+            html += '<option value="' + s.index + '">' + label + '</option>';
+        }
+
+        sub1.innerHTML = html;
+        sub2.innerHTML = html;
+
+        // Restaurer les selections si possible
+        if (val1) sub1.value = val1;
+        if (val2) sub2.value = val2;
     }
 
     // Afficher un resultat

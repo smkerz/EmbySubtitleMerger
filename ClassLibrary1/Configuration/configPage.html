@@ -10,7 +10,7 @@
          data-controller="configurationpage?name=subtitlemerger.js">
         <div data-role="content">
             <div class="content-primary">
-                <h1>Subtitle Merger <span style="font-size:0.5em; color:#888;">v8.7.1</span></h1>
+                <h1>Subtitle Merger <span style="font-size:0.5em; color:#888;">v8.9.0</span></h1>
 
                 <style>
                     .merger-card { background: rgba(0,0,0,0.2); border-radius: 8px; padding: 15px; margin-bottom: 15px; }
@@ -62,6 +62,17 @@
                         <option value="">-- Chargez d'abord --</option>
                     </select>
                     <div id="itemCount" style="margin-top:8px; color:#888; font-size:0.85em;"></div>
+                </div>
+
+                <!-- Step 2b: Select Version (if multiple) -->
+                <div id="versionSection" class="merger-card" style="display:none;">
+                    <h3>2b. Selectionner la version</h3>
+                    <p style="color:#ff9800; font-size:0.85em; margin:0 0 10px 0;">
+                        Cet element a plusieurs versions. Selectionnez celle a utiliser :
+                    </p>
+                    <select id="versionSelect" is="emby-select" style="width:100%;">
+                        <option value="">-- Choisir --</option>
+                    </select>
                 </div>
 
                 <!-- Step 3: Subtitles -->

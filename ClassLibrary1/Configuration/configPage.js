@@ -1,12 +1,13 @@
 define([], function () {
     'use strict';
 
-    console.log('[SubMerger] Module loaded v8.7.1');
+    console.log('[SubMerger] Module loaded v8.9.0');
 
     var allMovies = [];      // Tous les medias charges
     var filteredMovies = []; // Medias filtres
     var libraries = [];      // Liste des mediatheques
     var currentMovie = null;
+    var currentMediaSource = null; // Version selectionnee (MediaSource)
     var useCloudApi = false;
 
     function getApiClient() {
@@ -84,7 +85,7 @@ define([], function () {
         var params = {
             Recursive: true,
             SortBy: 'SortName',
-            Fields: 'Path,MediaStreams,SeriesName,ParentIndexNumber,IndexNumber'
+            Fields: 'Path,MediaStreams,MediaSources,SeriesName,ParentIndexNumber,IndexNumber'
         };
 
         // Filtre par type
@@ -177,12 +178,14 @@ define([], function () {
 
     function onMovieChange(view) {
         var idx = parseInt(view.querySelector('#moviesSelect').value);
+        var versionSection = view.querySelector('#versionSection');
         var subSection = view.querySelector('#subtitlesSection');
         var optionsSection = view.querySelector('#optionsSection');
         var mergeModeSection = view.querySelector('#mergeModeSection');
         var mergeSection = view.querySelector('#mergeSection');
 
         if (isNaN(idx) || idx < 0 || idx >= filteredMovies.length) {
+            versionSection.style.display = 'none';
             subSection.style.display = 'none';
             optionsSection.style.display = 'none';
             mergeModeSection.style.display = 'none';
@@ -191,10 +194,115 @@ define([], function () {
         }
 
         currentMovie = filteredMovies[idx];
-        log(view, 'Selection: ' + getItemLabel(currentMovie));
+        currentMediaSource = null;
+        log(view, 'Chargement des details...');
+
+        // Recharger les donnees completes de l'item pour avoir toutes les MediaSources
+        var apiClient = getApiClient();
+        var userId = apiClient.getCurrentUserId();
+        var url = apiClient.getUrl('Users/' + userId + '/Items/' + currentMovie.Id, {
+            Fields: 'Path,MediaStreams,MediaSources,SeriesName,ParentIndexNumber,IndexNumber'
+        });
+
+        apiClient.getJSON(url).then(function(data) {
+            // Mettre a jour les donnees dans les listes
+            var aIdx = allMovies.findIndex(function(m) { return m.Id === data.Id; });
+            if (aIdx >= 0) allMovies[aIdx] = data;
+            var fIdx = filteredMovies.findIndex(function(m) { return m.Id === data.Id; });
+            if (fIdx >= 0) filteredMovies[fIdx] = data;
+            currentMovie = data;
+
+            log(view, 'Selection: ' + getItemLabel(currentMovie));
+            showMediaSources(view);
+        }).catch(function(e) {
+            console.error('[SubMerger] Error loading item details:', e);
+            // Fallback: utiliser les donnees du chargement en masse
+            log(view, 'Selection: ' + getItemLabel(currentMovie));
+            showMediaSources(view);
+        });
+    }
+
+    function showMediaSources(view) {
+        var versionSection = view.querySelector('#versionSection');
+        var subSection = view.querySelector('#subtitlesSection');
+        var optionsSection = view.querySelector('#optionsSection');
+        var mergeModeSection = view.querySelector('#mergeModeSection');
+        var mergeSection = view.querySelector('#mergeSection');
+
+        // Verifier si plusieurs versions existent
+        var mediaSources = currentMovie.MediaSources || [];
+        console.log('[SubMerger] MediaSources:', mediaSources.length, mediaSources);
+
+        if (mediaSources.length > 1) {
+            // Plusieurs versions - afficher le selecteur
+            var versionSelect = view.querySelector('#versionSelect');
+            versionSelect.innerHTML = '<option value="">-- Choisir une version --</option>';
+
+            for (var v = 0; v < mediaSources.length; v++) {
+                var ms = mediaSources[v];
+                var versionLabel = ms.Name || ms.Path || ('Version ' + (v + 1));
+                // Extraire juste le nom du fichier
+                if (ms.Path) {
+                    versionLabel = ms.Path.split(/[\\/]/).pop();
+                }
+                var opt = document.createElement('option');
+                opt.value = v;
+                opt.textContent = versionLabel;
+                versionSelect.appendChild(opt);
+            }
+
+            versionSelect.onchange = function() {
+                onVersionChange(view);
+            };
+
+            versionSection.style.display = 'block';
+            subSection.style.display = 'none';
+            optionsSection.style.display = 'none';
+            mergeModeSection.style.display = 'none';
+            mergeSection.style.display = 'none';
+        } else {
+            // Une seule version ou pas de MediaSources - charger directement
+            versionSection.style.display = 'none';
+            if (mediaSources.length === 1) {
+                currentMediaSource = mediaSources[0];
+            }
+            loadSubtitlesForCurrentSource(view);
+        }
+    }
+
+    function onVersionChange(view) {
+        var versionSelect = view.querySelector('#versionSelect');
+        var idx = parseInt(versionSelect.value);
+        var mediaSources = currentMovie.MediaSources || [];
+
+        if (isNaN(idx) || idx < 0 || idx >= mediaSources.length) {
+            view.querySelector('#subtitlesSection').style.display = 'none';
+            view.querySelector('#optionsSection').style.display = 'none';
+            view.querySelector('#mergeModeSection').style.display = 'none';
+            view.querySelector('#mergeSection').style.display = 'none';
+            return;
+        }
+
+        currentMediaSource = mediaSources[idx];
+        console.log('[SubMerger] Version selectionnee:', currentMediaSource.Path);
+        loadSubtitlesForCurrentSource(view);
+    }
+
+    function loadSubtitlesForCurrentSource(view) {
+        var subSection = view.querySelector('#subtitlesSection');
+        var optionsSection = view.querySelector('#optionsSection');
+        var mergeModeSection = view.querySelector('#mergeModeSection');
+        var mergeSection = view.querySelector('#mergeSection');
+
+        // Utiliser les MediaStreams de la MediaSource si disponible, sinon ceux du film
+        var streams = [];
+        if (currentMediaSource && currentMediaSource.MediaStreams) {
+            streams = currentMediaSource.MediaStreams;
+        } else if (currentMovie.MediaStreams) {
+            streams = currentMovie.MediaStreams;
+        }
 
         var subs = [];
-        var streams = currentMovie.MediaStreams || [];
         for (var i = 0; i < streams.length; i++) {
             var s = streams[i];
             if (s.Type === 'Subtitle') {
@@ -206,6 +314,11 @@ define([], function () {
                 label += ' (' + (s.Codec || '?') + ')';
                 label += isExternal ? ' [EXT]' : ' [INT]';
                 if (!isText) label += ' [IMAGE]';
+                // Ajouter le nom du fichier pour les sous-titres externes
+                if (isExternal && subPath) {
+                    var fileName = subPath.split(/[\\/]/).pop();
+                    if (fileName) label += ' - ' + fileName;
+                }
                 subs.push({ index: s.Index, label: label, isText: isText, isExternal: isExternal, path: subPath });
             }
         }
@@ -262,7 +375,7 @@ define([], function () {
         var apiClient = getApiClient();
         var userId = apiClient.getCurrentUserId();
         var url = apiClient.getUrl('Users/' + userId + '/Items/' + currentMovie.Id, {
-            Fields: 'Path,MediaStreams,SeriesName,ParentIndexNumber,IndexNumber'
+            Fields: 'Path,MediaStreams,MediaSources,SeriesName,ParentIndexNumber,IndexNumber'
         });
 
         apiClient.getJSON(url).then(function(data) {
@@ -287,18 +400,18 @@ define([], function () {
         var baseUrl = apiClient.serverAddress();
         var apiKey = apiClient.accessToken();
 
-        // Appeler l'API Emby pour rafraichir les metadonnees de l'element
-        var refreshUrl = baseUrl + '/emby/Items/' + itemId + '/Refresh?Recursive=false&MetadataRefreshMode=Default&ImageRefreshMode=Default&ReplaceAllMetadata=false&ReplaceAllImages=false&api_key=' + apiKey;
+        // Appeler l'API Emby avec FullRefresh pour forcer la detection du nouveau fichier .dual.srt
+        var refreshUrl = baseUrl + '/emby/Items/' + itemId + '/Refresh?Recursive=false&MetadataRefreshMode=FullRefresh&ImageRefreshMode=Default&ReplaceAllMetadata=false&ReplaceAllImages=false&api_key=' + apiKey;
 
-        console.log('[SubMerger] Refreshing item metadata:', itemId);
+        console.log('[SubMerger] Refreshing item metadata (FullRefresh):', itemId);
 
         return fetch(refreshUrl, { method: 'POST' })
             .then(function(response) {
                 if (response.ok) {
                     console.log('[SubMerger] Item metadata refresh triggered');
-                    // Attendre un peu pour que Emby traite le refresh
+                    // Attendre qu'Emby traite le refresh et detecte le nouveau sous-titre
                     return new Promise(function(resolve) {
-                        setTimeout(resolve, 2000);
+                        setTimeout(resolve, 4000);
                     });
                 } else {
                     console.error('[SubMerger] Refresh failed:', response.status);
@@ -435,14 +548,16 @@ define([], function () {
         var baseUrl = apiClient.serverAddress();
         var url = baseUrl + '/EmbySubtitleMerger/Merge?api_key=' + embyApiKey;
 
+        // Utiliser le chemin de la version selectionnee si disponible
+        var videoPath = (currentMediaSource && currentMediaSource.Path) ? currentMediaSource.Path : currentMovie.Path;
         console.log('[SubMerger] Merge URL: ' + url);
-        console.log('[SubMerger] VideoPath: ' + currentMovie.Path);
+        console.log('[SubMerger] VideoPath: ' + videoPath);
 
         fetch(url, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-                VideoPath: currentMovie.Path,
+                VideoPath: videoPath,
                 PrimaryIndex: parseInt(v1),
                 SecondaryIndex: parseInt(v2),
                 Primary1IsExternal: sub1IsExternal,
@@ -483,7 +598,7 @@ define([], function () {
     }
 
     return function (view) {
-        console.log('[SubMerger] Controller init v8.7.1');
+        console.log('[SubMerger] Controller init v8.9.0');
 
         view.addEventListener('viewshow', function () {
             console.log('[SubMerger] viewshow event');
