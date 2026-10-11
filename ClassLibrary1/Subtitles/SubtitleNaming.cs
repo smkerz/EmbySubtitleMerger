@@ -142,14 +142,22 @@ namespace EmbySubtitleMerger.Subtitles
         }
 
         /// <summary>
-        /// Indique si un nom de fichier est celui d'un bilingue créé par ce plugin pour la vidéo donnée :
-        /// l'ancien Film.dual.srt, ou la forme exacte produite par DualFileName avec deux langues du catalogue.
+        /// Indique si un nom de fichier est celui d'un bilingue de la vidéo donnée : l'ancien Film.dual.srt,
+        /// un "Film.dual.….srt" fait par un autre outil, ou la forme exacte produite par DualFileName
+        /// avec deux langues du catalogue.
         /// </summary>
         public static bool IsDualFileName(string videoName, string fileName)
         {
             if (!fileName.StartsWith(videoName + ".", StringComparison.Ordinal)) return false;
 
             if (fileName.Equals(videoName + LegacyDualSuffix, StringComparison.OrdinalIgnoreCase)) return true;
+
+            // Bilingues faits par d'autres outils : "Film.dual.ru-en.en.srt". Le titre commence par "dual"
+            if (fileName.StartsWith(videoName + ".dual.", StringComparison.OrdinalIgnoreCase)
+                && fileName.EndsWith(".srt", StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
 
             // "Français + English.fr.srt" ou "Français + English.fr.default.srt"
             var parts = fileName.Substring(videoName.Length + 1).Split('.');
