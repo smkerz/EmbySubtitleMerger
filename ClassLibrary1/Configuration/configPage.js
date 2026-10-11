@@ -1,7 +1,7 @@
 define([], function () {
     'use strict';
 
-    console.log('[SubMerger] Module loaded v9.15.0');
+    console.log('[SubMerger] Module loaded v9.15.1');
 
     var allMovies = [];      // Tous les medias charges
     var filteredMovies = []; // Medias filtres
@@ -1377,7 +1377,7 @@ define([], function () {
     }
 
     return function (view) {
-        console.log('[SubMerger] Controller init v9.15.0');
+        console.log('[SubMerger] Controller init v9.15.1');
 
         var bound = false;
 

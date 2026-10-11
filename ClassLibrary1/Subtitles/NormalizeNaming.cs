@@ -57,8 +57,19 @@ namespace EmbySubtitleMerger.Subtitles
 
         private static readonly HashSet<string> VideoExtensions = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
         {
-            ".mkv", ".mp4", ".m4v", ".avi", ".mov", ".webm"
+            ".mkv", ".mp4", ".m4v", ".avi", ".mov", ".webm",
+            ".ts", ".m2ts", ".mts", ".mpg", ".mpeg", ".wmv", ".flv", ".ogv", ".divx", ".vob", ".3gp"
         };
+
+        /// <summary>"….dual.srt" ou "….dual.ru-en.en.srt" : un bilingue, quel que soit le nom qui précède</summary>
+        private static readonly Regex DualNameRegex = new Regex(@"\.dual(\.[^.]+)*\.srt$",RegexOptions.Compiled | RegexOptions.IgnoreCase);
+
+        /// <summary>
+        /// Indique si un .srt qui ne correspond à aucune vidéo du dossier porte un nom de bilingue.
+        /// Emby rattache parfois un sous-titre à une vidéo dont le nom diffère un peu (plusieurs versions
+        /// d'un film, par exemple) : le plugin, lui, ne sait pas à quelle vidéo il appartient.
+        /// </summary>
+        public static bool IsOrphanBilingual(string srtPath) => DualNameRegex.IsMatch(Path.GetFileName(srtPath));
 
         private static readonly Regex ForbiddenTitleChars = new Regex(@"[\\/:*?""<>|.()]+", RegexOptions.Compiled);
         private static readonly Regex FontTagRegex = new Regex(@"</?font[^>]*>", RegexOptions.Compiled | RegexOptions.IgnoreCase);

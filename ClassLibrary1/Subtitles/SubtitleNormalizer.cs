@@ -370,6 +370,32 @@ namespace EmbySubtitleMerger.Subtitles
                 job.Processed++;
             }
 
+            // Nettoyage de toutes les médiathèques : les bilingues qui ne portent le nom d'aucune vidéo du dossier
+            if (options.Cleanup && options.CleanupBilingual && options.VideoPath == null)
+            {
+                foreach (var srt in files.Where(f => NormalizeNaming.IsSrt(f) && owners.Of(f) == null && NormalizeNaming.IsOrphanBilingual(f)).ToList())
+                {
+                    const string detail = "sous-titre bilingue (aucune vidéo du dossier ne porte exactement ce nom)";
+
+                    if (options.DryRun)
+                    {
+                        job.Add(NormalizeAction.Delete, NormalizeAction.Planned, srt, null, detail);
+                        continue;
+                    }
+
+                    try
+                    {
+                        File.Delete(srt);
+                        files.Remove(srt);
+                        job.Add(NormalizeAction.Delete, NormalizeAction.Done, srt, null, detail);
+                    }
+                    catch (Exception ex)
+                    {
+                        job.Add(NormalizeAction.Delete, NormalizeAction.Failed, srt, null, ex.Message);
+                    }
+                }
+            }
+
             if (options.VideosOnly) return;
 
             foreach (var subtitle in files.Where(NormalizeNaming.IsStyledSubtitleFile).Where(f => InScope(f, files, options)).ToList())
