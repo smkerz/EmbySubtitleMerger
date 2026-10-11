@@ -7,9 +7,9 @@
     <Nullable>enable</Nullable>
     <AssemblyName>EmbySubtitleMerger</AssemblyName>
     <RootNamespace>EmbySubtitleMerger</RootNamespace>
-    <Version>9.13.0</Version>
-    <AssemblyVersion>9.13.0.0</AssemblyVersion>
-    <FileVersion>9.13.0.0</FileVersion>
+    <Version>9.14.0</Version>
+    <AssemblyVersion>9.14.0.0</AssemblyVersion>
+    <FileVersion>9.14.0.0</FileVersion>
   </PropertyGroup>
   <ItemGroup>
     <Reference Include="MediaBrowser.Common">

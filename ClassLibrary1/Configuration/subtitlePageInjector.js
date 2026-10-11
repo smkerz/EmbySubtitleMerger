@@ -5,7 +5,7 @@
 (function() {
     'use strict';
 
-    console.log('[SubMerger] UI Injector loaded v9.13.0');
+    console.log('[SubMerger] UI Injector loaded v9.14.0');
 
     var INJECTOR_ID = 'subtitleMergerSection';
     var currentItemId = null;
@@ -119,9 +119,9 @@
 
     // Meme convention que la page du plugin : [OK] utilisable, [!] avec une reserve, [X] non utilisable
     function describe(sub) {
-        if (!sub.isText) return { mark: '[X]', note: 'image, pas de texte a fusionner' };
+        if (!sub.isText) return { mark: '[X]', note: 'image, pas de texte à fusionner' };
         if (sub.isExternal && !sub.path) return { mark: '[X]', note: 'fichier externe introuvable' };
-        if (sub.isForced) return { mark: '[!]', note: 'forced : quelques repliques seulement' };
+        if (sub.isForced) return { mark: '[!]', note: 'forced : quelques répliques seulement' };
         return { mark: '[OK]', note: '' };
     }
 
@@ -185,15 +185,15 @@
             html += '</div>';
 
             html += '<details style="margin-bottom: 15px;">';
-            html += '<summary style="cursor: pointer; opacity:0.75;">Options avancees</summary>';
+            html += '<summary style="cursor: pointer; opacity:0.75;">Options avancées</summary>';
             html += '<div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; margin-top: 10px;">';
             html += '<div><label style="' + LABEL_STYLE + '">Disposition</label>';
             html += '<select id="mergeLayout" style="' + FIELD_STYLE + '">';
             html += '<option value="topbottom">Langue 1 en haut, langue 2 en bas</option><option value="stacked">Les deux en bas</option></select></div>';
             html += '<div><label style="' + LABEL_STYLE + '">Mode</label>';
             html += '<select id="mergeMode" style="' + FIELD_STYLE + '">';
-            html += '<option value="all">Tous</option><option value="overlapping">Chevauchement</option><option value="primary">Priorite langue 1</option></select></div>';
-            html += '<div><label style="' + LABEL_STYLE + '">Tolerance (ms)</label>';
+            html += '<option value="all">Tous</option><option value="overlapping">Chevauchement</option><option value="primary">Priorité langue 1</option></select></div>';
+            html += '<div><label style="' + LABEL_STYLE + '">Tolérance (ms)</label>';
             html += '<input type="number" id="mergeTolerance" value="700" style="' + FIELD_STYLE + '"></div>';
             html += '</div></details>';
 
@@ -236,7 +236,7 @@
             try {
                 return JSON.parse(text);
             } catch (e) {
-                throw new Error('reponse inattendue du serveur (HTTP ' + response.status + ')');
+                throw new Error('réponse inattendue du serveur (HTTP ' + response.status + ')');
             }
         });
     }
@@ -257,7 +257,7 @@
         setMerging(false);
 
         if (data.Success) {
-            showResult(result, 'success', 'Fusion reussie ! ' + data.CueCount + ' sous-titres crees. Actualisation...');
+            showResult(result, 'success', 'Fusion réussie ! ' + data.CueCount + ' sous-titres créés. Actualisation...');
             refreshAndReload(item, result, data);
         } else {
             showResult(result, 'error', 'Erreur : ' + data.Error);
@@ -296,7 +296,7 @@
                 console.error('[SubMerger] Merge status error:', err);
                 if (++mergePollFailures >= 10) {
                     finishMerge(item, { Success: false, Error: 'suivi de la fusion impossible (' + err.message
-                        + '). Elle continue peut-etre sur le serveur.' });
+                        + '). Elle continue peut-être sur le serveur.' });
                 } else {
                     mergePollTimer = setTimeout(function() { pollMerge(item); }, 3000);
                 }
@@ -311,11 +311,11 @@
         if (!sub1 || !sub2 || mergeJob) return;
 
         if (sub1.value === '' || sub2.value === '') {
-            showResult(result, 'error', 'Selectionnez 2 sous-titres');
+            showResult(result, 'error', 'Sélectionnez 2 sous-titres');
             return;
         }
         if (sub1.value === sub2.value) {
-            showResult(result, 'error', 'Choisissez 2 sous-titres differents');
+            showResult(result, 'error', 'Choisissez 2 sous-titres différents');
             return;
         }
 
@@ -326,7 +326,7 @@
         setMerging(true);
         mergeStarted = Date.now();
         mergePollFailures = 0;
-        showResult(result, 'info', 'Demarrage...');
+        showResult(result, 'info', 'Démarrage...');
 
         fetch(pluginUrl('Merge'), {
             method: 'POST',
@@ -368,7 +368,7 @@
         if (!apiClient) return;
 
         var itemId = currentItemId;
-        var done = 'Fusion reussie ! ' + mergeData.CueCount + ' sous-titres crees. ';
+        var done = 'Fusion réussie ! ' + mergeData.CueCount + ' sous-titres créés. ';
 
         // FullRefresh force Emby a detecter le nouveau fichier
         var refreshUrl = apiClient.serverAddress() + '/emby/Items/' + itemId
@@ -388,7 +388,7 @@
             .then(function(updatedItem) {
                 subtitles = readSubtitles(updatedItem);
                 updateSubtitleSelects();
-                showResult(resultEl, 'success', done + 'Liste actualisee.');
+                showResult(resultEl, 'success', done + 'Liste actualisée.');
             })
             .catch(function(err) {
                 console.error('[SubMerger] Refresh/reload error:', err);

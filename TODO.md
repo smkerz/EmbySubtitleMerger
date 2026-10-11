@@ -1,12 +1,12 @@
 # À faire
 
-État au 11/10/2026, version 9.12.0. Tout le code est commité sur la branche
+État au 11/10/2026, version 9.14.0. Tout le code est commité sur la branche
 `feature/traduction-nommage-disposition`. La dernière version installée sur le NAS est plus ancienne :
 presque rien de ce qui suit n'a encore tourné dans le vrai Emby.
 
 ## À vérifier sur le NAS (par l'utilisateur)
 
-- [ ] **Installer la 9.12.0** et vérifier que le plugin se charge. S'il ne se charge plus, les deux premiers
+- [ ] **Installer la 9.14.0** et vérifier que le plugin se charge. S'il ne se charge plus, les deux premiers
       suspects sont la tâche planifiée (`NormalizeScheduledTask`) et l'authentification des adresses
       (`[Authenticated(Roles = "Admin")]`), ajoutées sans pouvoir être essayées dans Emby.
 - [ ] **Fusion** sur un gros film (Les Deux Tours) : l'erreur « not valid JSON » doit avoir disparu.
@@ -28,8 +28,8 @@ presque rien de ce qui suit n'a encore tourné dans le vrai Emby.
       (`MergeService.cs`, `SubtitleMerger.html`). Les fichiers sont corrigés ou retirés, mais l'historique
       la contient toujours : la supprimer dans Emby (Tableau de bord, Clés API).
 - [ ] Fusionner la branche dans `main` une fois la version validée sur le NAS.
-- [ ] Accents dans les textes de la page (tout est écrit sans accents par précaution d'encodage).
-- [ ] Renommage des anciens `.dual.srt` en tâche de fond, seulement si l'aperçu s'avère trop lent sur le NAS.
+- [x] Accents dans les textes de la page (9.14.0). Si des caractères du type « Ã© » apparaissent, le serveur sert la page dans un autre encodage : le signaler.
+- [x] Outil de renommage des anciens `.dual.srt` retiré (9.13.0) : il n'y avait plus rien à renommer.
 - [ ] Captures d'écran du README à refaire (elles montrent l'ancienne page).
 - [ ] Moteur de traduction gratuit de meilleure qualité (Gemini, palier gratuit avec clé) si Google
       Traduction ne suffit pas.

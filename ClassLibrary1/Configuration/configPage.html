@@ -10,7 +10,7 @@
          data-controller="configurationpage?name=subtitlemerger.js">
         <div data-role="content">
             <div class="content-primary">
-                <h1>Subtitle Merger <span style="font-size:0.5em; color:#888;">v9.13.0</span></h1>
+                <h1>Subtitle Merger <span style="font-size:0.5em; color:#888;">v9.14.0</span></h1>
 
                 <style>
                     .merger-card { background: rgba(0,0,0,0.2); border-radius: 8px; padding: 15px; margin-bottom: 15px; }
@@ -57,15 +57,15 @@
 
                 <!-- Choix du media : commun a la fusion, la traduction et la normalisation d'un film -->
                 <div class="merger-card">
-                    <h3>Choisir un film ou un episode</h3>
+                    <h3>Choisir un film ou un épisode</h3>
                     <div style="display:flex; gap:10px; flex-wrap:wrap; align-items:center; margin-bottom:10px;">
                         <select id="libraryFilter" is="emby-select" style="min-width:150px;">
-                            <option value="">Toutes les mediatheques</option>
+                            <option value="">Toutes les médiathèques</option>
                         </select>
                         <select id="typeFilter" is="emby-select" style="min-width:120px;">
                             <option value="">Tous types</option>
                             <option value="Movie">Films uniquement</option>
-                            <option value="Episode">Series uniquement</option>
+                            <option value="Episode">Séries uniquement</option>
                         </select>
                         <button id="btnLoad" type="button" is="emby-button" class="raised button-submit">
                             <span>Charger la liste</span>
@@ -79,13 +79,13 @@
                     <div id="itemCount" style="margin-top:8px; color:#888; font-size:0.85em;"></div>
 
                     <div id="versionSection" style="display:none; margin-top:12px;">
-                        <label class="merger-field-label" style="color:#ff9800;">Cet element a plusieurs versions. Choisissez celle a utiliser :</label>
+                        <label class="merger-field-label" style="color:#ff9800;">Cet élément a plusieurs versions. Choisissez celle à utiliser :</label>
                         <select id="versionSelect" is="emby-select" style="width:100%;">
                             <option value="">-- Choisir --</option>
                         </select>
                     </div>
 
-                    <div id="movieInfo" class="status-box status-info" style="margin:12px 0 0 0;">Choisissez une mediatheque puis cliquez sur "Charger la liste".</div>
+                    <div id="movieInfo" class="status-box status-info" style="margin:12px 0 0 0;">Choisissez une médiathèque puis cliquez sur "Charger la liste".</div>
                 </div>
 
                 <div class="merger-tabs">
@@ -97,7 +97,7 @@
 
                 <!-- Onglet Fusionner -->
                 <div class="tab-panel active" data-panel="merge">
-                    <div id="mergeHint" class="status-box status-info">Choisissez d'abord un film ou un episode ci-dessus : ses sous-titres apparaitront ici.</div>
+                    <div id="mergeHint" class="status-box status-info">Choisissez d'abord un film ou un épisode ci-dessus : ses sous-titres apparaîtront ici.</div>
 
                     <div id="mergeContent" class="merger-card" style="display:none;">
                         <h3 style="display:flex; justify-content:space-between; align-items:center;">
@@ -118,46 +118,46 @@
                             </div>
                         </div>
                         <p class="merger-help" style="margin:10px 0 0 0;">
-                            <strong>[OK]</strong> utilisable tel quel &nbsp; <strong>[!]</strong> utilisable avec une reserve &nbsp; <strong>[X]</strong> non utilisable.
-                            Un sous-titre ajoute ou supprime n'apparait qu'apres une analyse de la mediatheque dans Emby, puis "Recharger les pistes".
+                            <strong>[OK]</strong> utilisable tel quel &nbsp; <strong>[!]</strong> utilisable avec une réserve &nbsp; <strong>[X]</strong> non utilisable.
+                            Un sous-titre ajouté ou supprimé n'apparaît qu'après une analyse de la médiathèque dans Emby, puis "Recharger les pistes".
                         </p>
                         <div id="trackWarning" class="status-box status-warning" style="display:none; margin:15px 0 0 0;"></div>
                         <div id="imageWarning" class="status-box status-warning" style="display:none; margin:15px 0 0 0;">
-                            <strong>Attention:</strong> Vous avez selectionne un sous-titre IMAGE (bitmap).<br>
-                            L'extraction sera tentee mais peut echouer. Si cela ne fonctionne pas, utilisez
+                            <strong>Attention:</strong> Vous avez sélectionné un sous-titre IMAGE (bitmap).<br>
+                            L'extraction sera tentée mais peut échouer. Si cela ne fonctionne pas, utilisez
                             <a href="https://github.com/SubtitleEdit/subtitleedit" target="_blank" style="color:#00a4dc;">SubtitleEdit</a>
                             pour convertir le sous-titre en SRT d'abord (OCR).
                         </div>
 
                         <div class="option-group" style="margin-top:15px;">
-                            <label for="layout">Disposition a l'ecran:</label>
+                            <label for="layout">Disposition à l'écran:</label>
                             <select id="layout" is="emby-select">
                                 <option value="topbottom">Langue 1 en haut, langue 2 en bas</option>
-                                <option value="stacked">Tout en bas, l'une sous l'autre (compatible tous ecrans)</option>
+                                <option value="stacked">Tout en bas, l'une sous l'autre (compatible tous écrans)</option>
                             </select>
                         </div>
 
                         <details class="merger-advanced">
-                            <summary>Options avancees (les reglages par defaut conviennent le plus souvent)</summary>
+                            <summary>Options avancées (les réglages par défaut conviennent le plus souvent)</summary>
                             <div class="options-grid">
                                 <div class="option-group">
-                                    <label for="mergeMode">Repliques a garder:</label>
+                                    <label for="mergeMode">Répliques à garder:</label>
                                     <select id="mergeMode" is="emby-select">
-                                        <option value="all">Toutes les repliques des deux langues</option>
-                                        <option value="overlapping">Seulement les repliques qui ont un equivalent dans l'autre langue</option>
-                                        <option value="primary">Langue 1 complete, langue 2 quand elle l'accompagne ou comble un silence</option>
+                                        <option value="all">Toutes les répliques des deux langues</option>
+                                        <option value="overlapping">Seulement les répliques qui ont un équivalent dans l'autre langue</option>
+                                        <option value="primary">Langue 1 complète, langue 2 quand elle l'accompagne ou comble un silence</option>
                                     </select>
                                 </div>
                                 <div class="option-group">
-                                    <label for="tolerance">Tolerance de synchronisation (ms):</label>
+                                    <label for="tolerance">Tolérance de synchronisation (ms):</label>
                                     <input type="number" id="tolerance" value="700" min="0" max="5000" step="100">
                                 </div>
                                 <div class="option-group">
-                                    <label for="offset1">Decalage du sous-titre 1 (ms):</label>
+                                    <label for="offset1">Décalage du sous-titre 1 (ms):</label>
                                     <input type="number" id="offset1" value="0" step="100">
                                 </div>
                                 <div class="option-group">
-                                    <label for="offset2">Decalage du sous-titre 2 (ms):</label>
+                                    <label for="offset2">Décalage du sous-titre 2 (ms):</label>
                                     <input type="number" id="offset2" value="0" step="100">
                                 </div>
                             </div>
@@ -170,26 +170,26 @@
                                 </div>
                                 <div id="modeCloud" class="merge-mode-btn" data-mode="cloud">
                                     <span class="mode-title">DoubleSub.io <span class="cloud-badge">Cloud</span></span>
-                                    <span class="mode-desc">API cloud (cle requise). Disposition et decalages non appliques.</span>
+                                    <span class="mode-desc">API cloud (clé requise). Disposition et décalages non appliqués.</span>
                                 </div>
                             </div>
                             <div id="apiKeySection" style="margin-top:15px; display:none;">
                                 <div class="option-group">
-                                    <label for="apiKey">Cle API DoubleSub.io:</label>
+                                    <label for="apiKey">Clé API DoubleSub.io:</label>
                                     <input type="text" id="apiKey" class="merger-text-input" placeholder="dsub_xxxxxxxxxxxxxxxx" style="font-family:monospace;">
                                 </div>
                                 <p class="merger-help" style="margin-top:8px;">
-                                    Obtenez votre cle gratuite sur <a href="https://doublesub.io/api/v1/docs" target="_blank" style="color:#00a4dc;">doublesub.io/api/v1/docs</a> (50 fusions/jour)
+                                    Obtenez votre clé gratuite sur <a href="https://doublesub.io/api/v1/docs" target="_blank" style="color:#00a4dc;">doublesub.io/api/v1/docs</a> (50 fusions/jour)
                                 </p>
                             </div>
                             <div id="cloudStatus" class="status-box status-info" style="margin-top:10px; display:none;">
-                                Verification de DoubleSub.io...
+                                Vérification de DoubleSub.io...
                             </div>
                         </details>
 
                         <label class="merger-check">
                             <input type="checkbox" id="mergeDefault">
-                            <span>Marquer le bilingue "par defaut" : Emby le selectionne de lui-meme a la lecture, selon vos reglages de sous-titres</span>
+                            <span>Marquer le bilingue "par défaut" : Emby le sélectionne de lui-même à la lecture, selon vos réglages de sous-titres</span>
                         </label>
 
                         <div class="merger-actions">
@@ -216,16 +216,16 @@
 
                 <!-- Onglet Traduire -->
                 <div class="tab-panel" data-panel="translate">
-                    <div id="translateHint" class="status-box status-info">Choisissez d'abord un film ou un episode ci-dessus : ses sous-titres apparaitront ici.</div>
+                    <div id="translateHint" class="status-box status-info">Choisissez d'abord un film ou un épisode ci-dessus : ses sous-titres apparaîtront ici.</div>
 
                     <div id="translateContent" class="merger-card" style="display:none;">
                         <h3>Traduire un sous-titre <span class="ai-badge">IA</span></h3>
                         <p class="merger-help">
-                            Traduit integralement une piste via l'API Claude (payante). Les timings sont conserves a l'identique.
+                            Traduit intégralement une piste via l'API Claude (payante). Les timings sont conservés à l'identique.
                             Un film prend plusieurs minutes ; vous pouvez quitter la page et y revenir.
                         </p>
 
-                        <label class="merger-field-label">Sous-titre a traduire</label>
+                        <label class="merger-field-label">Sous-titre à traduire</label>
                         <select id="translateSource" is="emby-select" style="width:100%;"><option value="">--</option></select>
                         <div id="translateSourceWarning" class="status-box status-warning" style="display:none; margin:15px 0 0 0;"></div>
 
@@ -233,64 +233,64 @@
                             <div class="option-group">
                                 <label for="targetLanguage">Traduire vers:</label>
                                 <select id="targetLanguage" is="emby-select">
-                                    <option value="fr">Francais</option>
+                                    <option value="fr">Français</option>
                                     <option value="en">Anglais</option>
                                     <option value="es">Espagnol</option>
                                     <option value="de">Allemand</option>
                                     <option value="it">Italien</option>
                                     <option value="pt">Portugais</option>
-                                    <option value="nl">Neerlandais</option>
+                                    <option value="nl">Néerlandais</option>
                                     <option value="pl">Polonais</option>
                                     <option value="ru">Russe</option>
                                     <option value="ja">Japonais</option>
-                                    <option value="ko">Coreen</option>
-                                    <option value="zh">Chinois (simplifie)</option>
+                                    <option value="ko">Coréen</option>
+                                    <option value="zh">Chinois (simplifié)</option>
                                     <option value="ar">Arabe</option>
                                     <option value="tr">Turc</option>
-                                    <option value="sv">Suedois</option>
+                                    <option value="sv">Suédois</option>
                                     <option value="da">Danois</option>
-                                    <option value="no">Norvegien</option>
+                                    <option value="no">Norvégien</option>
                                     <option value="fi">Finnois</option>
-                                    <option value="cs">Tcheque</option>
+                                    <option value="cs">Tchèque</option>
                                     <option value="el">Grec</option>
-                                    <option value="he">Hebreu</option>
+                                    <option value="he">Hébreu</option>
                                     <option value="hi">Hindi</option>
                                     <option value="uk">Ukrainien</option>
                                     <option value="ro">Roumain</option>
                                     <option value="hu">Hongrois</option>
-                                    <option value="th">Thai</option>
+                                    <option value="th">Thaï</option>
                                     <option value="vi">Vietnamien</option>
-                                    <option value="id">Indonesien</option>
+                                    <option value="id">Indonésien</option>
                                 </select>
                             </div>
                             <div class="option-group">
                                 <label for="translateEngine">Moteur de traduction:</label>
                                 <select id="translateEngine" is="emby-select">
-                                    <option value="google">Google Traduction (gratuit, sans cle)</option>
-                                    <option value="claude">Claude (payant, meilleure qualite)</option>
+                                    <option value="google">Google Traduction (gratuit, sans clé)</option>
+                                    <option value="claude">Claude (payant, meilleure qualité)</option>
                                 </select>
                             </div>
                             <div class="option-group" id="anthropicKeyGroup" style="display:none;">
-                                <label for="anthropicApiKey">Cle API Anthropic (enregistree sur le serveur):</label>
+                                <label for="anthropicApiKey">Clé API Anthropic (enregistrée sur le serveur):</label>
                                 <input type="password" id="anthropicApiKey" class="merger-text-input" placeholder="sk-ant-..." style="font-family:monospace;">
                             </div>
                         </div>
                         <p id="engineHelpGoogle" class="merger-help" style="margin-top:8px;">
                             Gratuit, sans compte. Traduit phrase par phrase, sans le contexte du film : correct pour suivre, moins naturel que Claude,
-                            et l'italique est perdu. Service non officiel de Google : il peut refuser les demandes apres plusieurs films a la suite.
+                            et l'italique est perdu. Service non officiel de Google : il peut refuser les demandes après plusieurs films à la suite.
                         </p>
                         <p id="engineHelpClaude" class="merger-help" style="margin-top:8px; display:none;">
-                            Payant a l'usage (quelques dizaines de centimes par film). Tient compte du contexte et du ton.
-                            Obtenez une cle sur <a href="https://console.anthropic.com/settings/keys" target="_blank" style="color:#00a4dc;">console.anthropic.com</a>.
+                            Payant à l'usage (quelques dizaines de centimes par film). Tient compte du contexte et du ton.
+                            Obtenez une clé sur <a href="https://console.anthropic.com/settings/keys" target="_blank" style="color:#00a4dc;">console.anthropic.com</a>.
                         </p>
 
                         <label class="merger-check" style="margin-top:12px;">
                             <input type="checkbox" id="translateThenMerge" checked>
-                            <span>Creer aussi le bilingue : traduction en langue 1, piste d'origine en langue 2 (disposition et options de l'onglet Fusionner)</span>
+                            <span>Créer aussi le bilingue : traduction en langue 1, piste d'origine en langue 2 (disposition et options de l'onglet Fusionner)</span>
                         </label>
                         <label class="merger-check">
                             <input type="checkbox" id="translateOverwrite">
-                            <span>Remplacer le sous-titre existant de cette langue, s'il y en a un (sinon la traduction est refusee)</span>
+                            <span>Remplacer le sous-titre existant de cette langue, s'il y en a un (sinon la traduction est refusée)</span>
                         </label>
 
                         <div class="merger-actions">
@@ -306,7 +306,7 @@
                             <div class="progress-track">
                                 <div id="translateProgressBar" class="progress-fill"></div>
                             </div>
-                            <span id="translateProgressLabel" class="progress-label">Preparation...</span>
+                            <span id="translateProgressLabel" class="progress-label">Préparation...</span>
                         </div>
 
                         <div id="translateResult" class="merger-result"></div>
@@ -319,50 +319,50 @@
                         <h3>Normaliser les sous-titres</h3>
                         <p class="merger-help">
                             Les sous-titres ASS/SSA ne s'affichent pas sur la plupart des TV et applis mobiles.
-                            Cet outil les convertit en fichiers <em>.srt</em> poses a cote des videos, avec la note
-                            "Normalise-pour-Emby" visible dans le lecteur. Une piste n'est pas convertie si la video contient deja
-                            un sous-titre texte dans la meme langue. L'image et le son des videos ne sont jamais reecrits.
-                            <br>Pour le faire automatiquement, par exemple chaque nuit : dans Emby, <em>Taches planifiees</em>, section
-                            <em>Subtitle Merger</em>, ajoutez un declencheur. La tache reprend les langues de votre derniere normalisation
-                            de toutes les mediatheques.
+                            Cet outil les convertit en fichiers <em>.srt</em> posés à côté des vidéos, avec la note
+                            "Normalisé-pour-Emby" visible dans le lecteur. Une piste n'est pas convertie si la vidéo contient déjà
+                            un sous-titre texte dans la même langue. L'image et le son des vidéos ne sont jamais réécrits.
+                            <br>Pour le faire automatiquement, par exemple chaque nuit : dans Emby, <em>Tâches planifiées</em>, section
+                            <em>Subtitle Merger</em>, ajoutez un déclencheur. La tâche reprend les langues de votre dernière normalisation
+                            de toutes les médiathèques.
                         </p>
 
                         <div id="normalizeTools" class="status-box status-warning" style="display:none;"></div>
 
                         <div class="options-grid">
                             <div class="option-group">
-                                <label for="normalizeScope">Perimetre:</label>
+                                <label for="normalizeScope">Périmètre:</label>
                                 <select id="normalizeScope" is="emby-select">
-                                    <option value="item">Le film ou l'episode selectionne</option>
-                                    <option value="all">Toutes les mediatheques</option>
+                                    <option value="item">Le film ou l'épisode sélectionné</option>
+                                    <option value="all">Toutes les médiathèques</option>
                                 </select>
                             </div>
                             <div class="option-group">
-                                <label for="normalizeLanguages">Langues a convertir (codes separes par des virgules):</label>
+                                <label for="normalizeLanguages">Langues à convertir (codes séparés par des virgules):</label>
                                 <input type="text" id="normalizeLanguages" class="merger-text-input" value="en, fr, ru">
                             </div>
                         </div>
 
                         <label class="merger-check" style="margin-top:12px;">
                             <input type="checkbox" id="normalizeAnnotate">
-                            <span>Ajouter la note aux .srt deja poses a cote des videos (renommage)</span>
+                            <span>Ajouter la note aux .srt déjà posés à côté des vidéos (renommage)</span>
                         </label>
                         <label class="merger-check">
                             <input type="checkbox" id="normalizeTagMkv" disabled>
-                            <span>Ajouter la note au titre des pistes SRT integrees aux .mkv (modifie l'en-tete du .mkv, pas l'image ni le son)</span>
+                            <span>Ajouter la note au titre des pistes SRT intégrées aux .mkv (modifie l'en-tête du .mkv, pas l'image ni le son)</span>
                         </label>
                         <label class="merger-check">
                             <input type="checkbox" id="normalizeExtract">
-                            <span>Extraire aussi en .srt les sous-titres texte deja integres (inutile pour la fusion ; ils apparaitront en double dans Emby)</span>
+                            <span>Extraire aussi en .srt les sous-titres texte déjà intégrés (inutile pour la fusion ; ils apparaîtront en double dans Emby)</span>
                         </label>
                         <label class="merger-check">
                             <input type="checkbox" id="normalizeOverwrite">
-                            <span>Refaire les .srt qui existent deja</span>
+                            <span>Refaire les .srt qui existent déjà</span>
                         </label>
 
                         <div class="merger-actions">
                             <button id="btnNormalizePreview" type="button" is="emby-button" class="raised">
-                                <span>Apercu (ne modifie rien)</span>
+                                <span>Aperçu (ne modifie rien)</span>
                             </button>
                             <button id="btnNormalizeApply" type="button" is="emby-button" class="raised button-submit" style="display:none;">
                                 <span>Normaliser</span>
@@ -371,32 +371,32 @@
                     </div>
 
                     <div class="merger-card">
-                        <h3>Nettoyer les sous-titres generes en trop</h3>
+                        <h3>Nettoyer les sous-titres générés en trop</h3>
                         <p class="merger-help">
-                            Retire des fichiers <em>.srt</em> crees par la normalisation ou la fusion, pour raccourcir la liste des sous-titres dans Emby.
-                            Le perimetre est celui choisi ci-dessus. Les .srt d'origine (meme renommes avec la note) ne sont jamais supprimes,
-                            les bilingues seulement si vous cochez la case. La suppression est definitive : les fichiers normalises
-                            peuvent etre recrees avec "Normaliser", les bilingues en refaisant la fusion.
+                            Retire des fichiers <em>.srt</em> créés par la normalisation ou la fusion, pour raccourcir la liste des sous-titres dans Emby.
+                            Le périmètre est celui choisi ci-dessus. Les .srt d'origine (même renommés avec la note) ne sont jamais supprimés,
+                            les bilingues seulement si vous cochez la case. La suppression est définitive : les fichiers normalisés
+                            peuvent être recréés avec "Normaliser", les bilingues en refaisant la fusion.
                         </p>
                         <label class="merger-check">
                             <input type="checkbox" checked disabled>
-                            <span>Les copies des sous-titres texte deja integres aux videos (toujours en double dans Emby)</span>
+                            <span>Les copies des sous-titres texte déjà intégrés aux vidéos (toujours en double dans Emby)</span>
                         </label>
                         <label class="merger-check">
                             <input type="checkbox" id="cleanupConversions">
-                            <span>Aussi les autres .srt tires d'une piste de la video : conversions de pistes ASS/SSA et fichiers de l'ancien script (une langue qui n'existe qu'en ASS ne s'affichera plus sur les appareils qui ne lisent pas l'ASS)</span>
+                            <span>Aussi les autres .srt tirés d'une piste de la vidéo : conversions de pistes ASS/SSA et fichiers de l'ancien script (une langue qui n'existe qu'en ASS ne s'affichera plus sur les appareils qui ne lisent pas l'ASS)</span>
                         </label>
                         <label class="merger-check">
                             <input type="checkbox" id="cleanupBilingual">
-                            <span>Aussi les sous-titres bilingues crees par la fusion (il faudra refaire la fusion pour les retrouver)</span>
+                            <span>Aussi les sous-titres bilingues créés par la fusion (il faudra refaire la fusion pour les retrouver)</span>
                         </label>
                         <label class="merger-check">
                             <input type="checkbox" id="cleanupNote">
-                            <span>Retirer aussi la note "Normalise pour Emby" : du titre des pistes des .mkv (modifie l'en-tete du .mkv, pas l'image ni le son) et du nom des .srt d'origine renommes. Aucun fichier supprime.</span>
+                            <span>Retirer aussi la note "Normalisé pour Emby" : du titre des pistes des .mkv (modifie l'en-tête du .mkv, pas l'image ni le son) et du nom des .srt d'origine renommés. Aucun fichier supprimé.</span>
                         </label>
                         <div class="merger-actions">
                             <button id="btnCleanupPreview" type="button" is="emby-button" class="raised">
-                                <span>Apercu (ne supprime rien)</span>
+                                <span>Aperçu (ne supprime rien)</span>
                             </button>
                             <button id="btnCleanupApply" type="button" is="emby-button" class="raised button-submit" style="display:none;">
                                 <span>Appliquer le nettoyage</span>
@@ -409,7 +409,7 @@
                         <div class="progress-track" style="margin-top:0;">
                             <div id="normalizeProgressBar" class="progress-fill"></div>
                         </div>
-                        <span id="normalizeProgressLabel" class="progress-label">Preparation...</span>
+                        <span id="normalizeProgressLabel" class="progress-label">Préparation...</span>
                         <div class="merger-actions" style="margin-top:10px;">
                             <button id="btnNormalizeCancel" type="button" is="emby-button" class="raised">
                                 <span>Annuler</span>
@@ -423,12 +423,12 @@
                 <!-- Onglet Maintenance : operations sur toutes les mediatheques -->
                 <div class="tab-panel" data-panel="tools">
                     <div class="merger-card">
-                        <h3>Creer les bilingues en serie</h3>
+                        <h3>Créer les bilingues en série</h3>
                         <p class="merger-help">
-                            Cree le sous-titre bilingue de chaque video qui a les deux langues et pas encore ce bilingue :
-                            toute une saison d'un coup, ou toute la bibliotheque. Pour chaque langue, l'outil prend un .srt pose a cote
-                            de la video s'il y en a un, sinon une piste texte de la video (jamais une piste forced ni une image).
-                            La disposition et les options sont celles de l'onglet Fusionner. Relancer ne refait que les nouvelles videos.
+                            Crée le sous-titre bilingue de chaque vidéo qui a les deux langues et pas encore ce bilingue :
+                            toute une saison d'un coup, ou toute la bibliothèque. Pour chaque langue, l'outil prend un .srt posé à côté
+                            de la vidéo s'il y en a un, sinon une piste texte de la vidéo (jamais une piste forced ni une image).
+                            La disposition et les options sont celles de l'onglet Fusionner. Relancer ne refait que les nouvelles vidéos.
                         </p>
                         <div class="options-grid">
                             <div class="option-group">
@@ -441,25 +441,25 @@
                             </div>
                         </div>
                         <div class="option-group" style="margin-top:12px;">
-                            <label for="batchScope">Perimetre:</label>
+                            <label for="batchScope">Périmètre:</label>
                             <select id="batchScope" is="emby-select">
-                                <option value="folder">Le dossier du film ou de l'episode selectionne (une saison, par exemple)</option>
-                                <option value="all">Toutes les mediatheques</option>
+                                <option value="folder">Le dossier du film ou de l'épisode sélectionné (une saison, par exemple)</option>
+                                <option value="all">Toutes les médiathèques</option>
                             </select>
                         </div>
                         <div class="merger-actions">
                             <button id="btnBatchPreview" type="button" is="emby-button" class="raised">
-                                <span>Apercu (ne modifie rien)</span>
+                                <span>Aperçu (ne modifie rien)</span>
                             </button>
                             <button id="btnBatchApply" type="button" is="emby-button" class="raised button-submit" style="display:none;">
-                                <span>Creer ces bilingues</span>
+                                <span>Créer ces bilingues</span>
                             </button>
                         </div>
                         <div id="batchProgress" style="display:none; margin-top:12px;">
                             <div class="progress-track" style="margin-top:0;">
                                 <div id="batchProgressBar" class="progress-fill"></div>
                             </div>
-                            <span id="batchProgressLabel" class="progress-label">Preparation...</span>
+                            <span id="batchProgressLabel" class="progress-label">Préparation...</span>
                             <div class="merger-actions" style="margin-top:10px;">
                                 <button id="btnBatchCancel" type="button" is="emby-button" class="raised">
                                     <span>Annuler</span>
@@ -470,41 +470,41 @@
                     </div>
 
                     <div class="merger-card">
-                        <h3>Nettoyer toutes les mediatheques</h3>
+                        <h3>Nettoyer toutes les médiathèques</h3>
                         <p class="merger-help">
-                            Le meme nettoyage que dans l'onglet Normaliser, applique a tous les films et episodes.
-                            Commencez par l'apercu : il liste ce qui serait fait, sans rien modifier.
-                            Les .srt d'origine ne sont jamais supprimes. La suppression est definitive.
+                            Le même nettoyage que dans l'onglet Normaliser, appliqué à tous les films et épisodes.
+                            Commencez par l'aperçu : il liste ce qui serait fait, sans rien modifier.
+                            Les .srt d'origine ne sont jamais supprimés. La suppression est définitive.
                         </p>
                         <label class="merger-check">
                             <input type="checkbox" checked disabled>
-                            <span>Supprimer les copies des sous-titres texte deja integres aux videos (toujours en double dans Emby)</span>
+                            <span>Supprimer les copies des sous-titres texte déjà intégrés aux vidéos (toujours en double dans Emby)</span>
                         </label>
                         <label class="merger-check">
                             <input type="checkbox" id="libCleanupConversions">
-                            <span>Supprimer aussi les autres .srt tires d'une piste de la video : conversions de pistes ASS/SSA et fichiers de l'ancien script (une langue qui n'existe qu'en ASS ne s'affichera plus sur les appareils qui ne lisent pas l'ASS)</span>
+                            <span>Supprimer aussi les autres .srt tirés d'une piste de la vidéo : conversions de pistes ASS/SSA et fichiers de l'ancien script (une langue qui n'existe qu'en ASS ne s'affichera plus sur les appareils qui ne lisent pas l'ASS)</span>
                         </label>
                         <label class="merger-check">
                             <input type="checkbox" id="libCleanupBilingual">
-                            <span>Supprimer aussi les sous-titres bilingues crees par la fusion (il faudra refaire chaque fusion pour les retrouver)</span>
+                            <span>Supprimer aussi les sous-titres bilingues créés par la fusion (il faudra refaire chaque fusion pour les retrouver)</span>
                         </label>
                         <label class="merger-check">
                             <input type="checkbox" id="libCleanupNote">
-                            <span>Retirer la note "Normalise pour Emby" : du titre des pistes des .mkv (modifie l'en-tete du .mkv, pas l'image ni le son) et du nom des .srt d'origine renommes. Aucun fichier supprime.</span>
+                            <span>Retirer la note "Normalisé pour Emby" : du titre des pistes des .mkv (modifie l'en-tête du .mkv, pas l'image ni le son) et du nom des .srt d'origine renommés. Aucun fichier supprimé.</span>
                         </label>
                         <div class="merger-actions">
                             <button id="btnLibCleanupPreview" type="button" is="emby-button" class="raised">
-                                <span>Apercu (ne modifie rien)</span>
+                                <span>Aperçu (ne modifie rien)</span>
                             </button>
                             <button id="btnLibCleanupApply" type="button" is="emby-button" class="raised button-submit" style="display:none;">
-                                <span>Appliquer a toutes les mediatheques</span>
+                                <span>Appliquer à toutes les médiathèques</span>
                             </button>
                         </div>
                         <div id="libProgress" style="display:none; margin-top:12px;">
                             <div class="progress-track" style="margin-top:0;">
                                 <div id="libProgressBar" class="progress-fill"></div>
                             </div>
-                            <span id="libProgressLabel" class="progress-label">Preparation...</span>
+                            <span id="libProgressLabel" class="progress-label">Préparation...</span>
                             <div class="merger-actions" style="margin-top:10px;">
                                 <button id="btnLibCancel" type="button" is="emby-button" class="raised">
                                     <span>Annuler</span>

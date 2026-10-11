@@ -1,7 +1,7 @@
 define([], function () {
     'use strict';
 
-    console.log('[SubMerger] Module loaded v9.13.0');
+    console.log('[SubMerger] Module loaded v9.14.0');
 
     var allMovies = [];      // Tous les medias charges
     var filteredMovies = []; // Medias filtres
@@ -54,8 +54,8 @@ define([], function () {
             try {
                 return JSON.parse(text);
             } catch (e) {
-                throw new Error('reponse inattendue du serveur (HTTP ' + response.status + '). ' +
-                    'La requete a peut-etre ete coupee avant la fin.');
+                throw new Error('réponse inattendue du serveur (HTTP ' + response.status + '). ' +
+                    'La requête a peut-être été coupée avant la fin.');
             }
         });
     }
@@ -157,7 +157,7 @@ define([], function () {
         apiClient.getJSON(url).then(function(data) {
             libraries = data.Items || [];
             var libSelect = view.querySelector('#libraryFilter');
-            libSelect.innerHTML = '<option value="">Toutes les mediatheques</option>';
+            libSelect.innerHTML = '<option value="">Toutes les médiathèques</option>';
 
             for (var i = 0; i < libraries.length; i++) {
                 var lib = libraries[i];
@@ -226,7 +226,7 @@ define([], function () {
             view.querySelector('#searchFilter').value = '';
 
             updateMoviesList(view);
-            success(view, allMovies.length + ' elements charges!');
+            success(view, allMovies.length + ' éléments chargés!');
         }).catch(function (e) {
             console.error('[SubMerger] Error:', e);
             error(view, 'Erreur: ' + (e.message || e));
@@ -265,8 +265,8 @@ define([], function () {
         sel.innerHTML = '';
 
         if (filteredMovies.length === 0) {
-            sel.innerHTML = '<option value="">-- Aucun resultat --</option>';
-            countEl.textContent = '0 element';
+            sel.innerHTML = '<option value="">-- Aucun résultat --</option>';
+            countEl.textContent = '0 élément';
             return;
         }
 
@@ -278,7 +278,7 @@ define([], function () {
             sel.appendChild(opt);
         }
 
-        countEl.textContent = filteredMovies.length + ' element(s) affiche(s)' +
+        countEl.textContent = filteredMovies.length + ' élément(s) affiché(s)' +
             (filteredMovies.length !== allMovies.length ? ' sur ' + allMovies.length : '');
     }
 
@@ -292,7 +292,7 @@ define([], function () {
 
         currentMovie = filteredMovies[idx];
         currentMediaSource = null;
-        log(view, 'Chargement des details...');
+        log(view, 'Chargement des détails...');
 
         // Recharger les donnees completes de l'item pour avoir toutes les MediaSources
         var apiClient = getApiClient();
@@ -309,12 +309,12 @@ define([], function () {
             if (fIdx >= 0) filteredMovies[fIdx] = data;
             currentMovie = data;
 
-            log(view, 'Selection: ' + getItemLabel(currentMovie));
+            log(view, 'Sélection: ' + getItemLabel(currentMovie));
             showMediaSources(view);
         }).catch(function(e) {
             console.error('[SubMerger] Error loading item details:', e);
             // Fallback: utiliser les donnees du chargement en masse
-            log(view, 'Selection: ' + getItemLabel(currentMovie));
+            log(view, 'Sélection: ' + getItemLabel(currentMovie));
             showMediaSources(view);
         });
     }
@@ -443,14 +443,14 @@ define([], function () {
 
         setWorkSectionsVisible(view, true);
 
-        success(view, getItemLabel(currentMovie) + ' : ' + subs.length + ' sous-titre(s) trouve(s). Choisissez une action dans les onglets ci-dessous.');
+        success(view, getItemLabel(currentMovie) + ' : ' + subs.length + ' sous-titre(s) trouvé(s). Choisissez une action dans les onglets ci-dessous.');
 
         checkCloudStatus(view);
     }
 
     function refreshMovieMetadata(view) {
         if (!currentMovie) {
-            error(view, 'Selectionnez d\'abord un element');
+            error(view, 'Sélectionnez d\'abord un élément');
             return;
         }
 
@@ -478,7 +478,7 @@ define([], function () {
             }
             currentMovie = data;
             onMovieChange(view);
-            success(view, 'Sous-titres actualises!');
+            success(view, 'Sous-titres actualisés!');
         }).catch(function(e) {
             error(view, 'Erreur rechargement: ' + (e.message || e));
         });
@@ -522,25 +522,25 @@ define([], function () {
 
         if (!stream.IsTextSubtitleStream) {
             // Le detail est donne par l'encadre #imageWarning
-            info = { mark: '[X]', short: 'image, pas de texte a fusionner', warning: '' };
+            info = { mark: '[X]', short: 'image, pas de texte à fusionner', warning: '' };
         } else if (codec === 'ass' || codec === 'ssa') {
             // Le serveur normalise la piste le temps de l'operation : conversion en SRT, codes de style retires
-            info = { mark: '[OK]', short: 'ASS, normalise automatiquement a la fusion', warning: '' };
+            info = { mark: '[OK]', short: 'ASS, normalisé automatiquement à la fusion', warning: '' };
         } else if (codec === 'srt' || codec === 'subrip') {
-            info = { mark: '[OK]', short: 'pret pour la fusion', warning: '' };
+            info = { mark: '[OK]', short: 'prêt pour la fusion', warning: '' };
         } else if (!external) {
             // MOV_TEXT, WEBVTT... : texte integre, converti a l'extraction
-            info = { mark: '[OK]', short: 'converti en SRT a la fusion', warning: '' };
+            info = { mark: '[OK]', short: 'converti en SRT à la fusion', warning: '' };
         } else {
-            info = { mark: '[!]', short: 'format externe, converti a la fusion',
-                warning: 'fichier externe au format ' + (stream.Codec || 'inconnu') + ' : il sera converti en SRT le temps de l\'operation, mais ce format n\'a pas ete verifie. Controlez le resultat.' };
+            info = { mark: '[!]', short: 'format externe, converti à la fusion',
+                warning: 'fichier externe au format ' + (stream.Codec || 'inconnu') + ' : il sera converti en SRT le temps de l\'opération, mais ce format n\'a pas été vérifié. Contrôlez le résultat.' };
         }
 
         var forced = !!stream.IsForced || /forced/i.test((stream.Title || '') + ' ' + (stream.DisplayTitle || ''));
         if (forced && info.mark !== '[X]') {
             info.mark = '[!]';
             info.short += ', forced';
-            info.warning = 'piste "forced" : elle ne contient que quelques repliques (passages en langue etrangere). Le bilingue sera presque monolingue.'
+            info.warning = 'piste "forced" : elle ne contient que quelques répliques (passages en langue étrangère). Le bilingue sera presque monolingue.'
                 + (info.warning ? ' De plus, ' + info.warning : '');
         }
 
@@ -589,7 +589,7 @@ define([], function () {
                 }
             })
             .catch(function() {
-                cloudStatus.textContent = 'Impossible de verifier DoubleSub.io';
+                cloudStatus.textContent = 'Impossible de vérifier DoubleSub.io';
                 cloudStatus.className = 'status-box status-error';
             });
     }
@@ -635,10 +635,10 @@ define([], function () {
     // Affiche le fichier produit, demande a Emby de le prendre en compte, puis recharge les pistes
     function showProducedThenRefresh(view, boxSelector, itemId, html) {
         var result = view.querySelector(boxSelector);
-        result.innerHTML = statusBox('ok', html + '<br><em>Actualisation des metadonnees...</em>');
+        result.innerHTML = statusBox('ok', html + '<br><em>Actualisation des métadonnées...</em>');
 
         refreshItemMetadata(view, itemId).then(function() {
-            result.innerHTML = statusBox('ok', html + '<br><em>Actualisation demandee : le sous-titre devrait apparaitre dans Emby.</em>');
+            result.innerHTML = statusBox('ok', html + '<br><em>Actualisation demandée : le sous-titre devrait apparaître dans Emby.</em>');
             // Ne pas ecraser la selection si l'utilisateur est passe a un autre film entre-temps
             if (currentMovie && currentMovie.Id === itemId) {
                 reloadCurrentMovie(view);
@@ -712,7 +712,7 @@ define([], function () {
                 console.error('[SubMerger] Merge status error:', e);
                 if (++mergePollFailures >= 10) {
                     finishMerge(view, { Success: false, Error: 'Suivi de la fusion impossible : ' + e.message +
-                        ' La fusion continue peut-etre sur le serveur : rechargez les pistes dans quelques minutes.' });
+                        ' La fusion continue peut-être sur le serveur : rechargez les pistes dans quelques minutes.' });
                 } else {
                     mergePollTimer = setTimeout(function () { pollMerge(view); }, 3000);
                 }
@@ -726,11 +726,11 @@ define([], function () {
         var v2 = sub2El.value;
 
         if (!currentMovie || !v1 || !v2) {
-            showMessage(view, '#result', 'warning', 'Choisissez les deux sous-titres a fusionner.');
+            showMessage(view, '#result', 'warning', 'Choisissez les deux sous-titres à fusionner.');
             return;
         }
         if (v1 === v2) {
-            showMessage(view, '#result', 'warning', 'Choisissez deux sous-titres differents.');
+            showMessage(view, '#result', 'warning', 'Choisissez deux sous-titres différents.');
             return;
         }
 
@@ -742,11 +742,11 @@ define([], function () {
         if (useCloudApi) {
             doublesubApiKey = view.querySelector('#apiKey').value.trim();
             if (!doublesubApiKey) {
-                showMessage(view, '#result', 'warning', 'Cle API DoubleSub.io requise pour le mode cloud (dans les options avancees).');
+                showMessage(view, '#result', 'warning', 'Clé API DoubleSub.io requise pour le mode cloud (dans les options avancées).');
                 return;
             }
             if (!doublesubApiKey.startsWith('dsub_')) {
-                showMessage(view, '#result', 'warning', 'Cle API DoubleSub.io invalide (elle doit commencer par dsub_).');
+                showMessage(view, '#result', 'warning', 'Clé API DoubleSub.io invalide (elle doit commencer par dsub_).');
                 return;
             }
             localStorage.setItem('doublesub_api_key', doublesubApiKey);
@@ -839,7 +839,7 @@ define([], function () {
         var message = '';
         if (option && option.value) {
             message = option.dataset.isText === 'false'
-                ? 'sous-titre image : il ne contient pas de texte, il ne peut pas etre traduit.'
+                ? 'sous-titre image : il ne contient pas de texte, il ne peut pas être traduit.'
                 : (option.dataset.warning || '');
         }
 
@@ -860,7 +860,7 @@ define([], function () {
 
         serverHasAnthropicKey = !!data.HasAnthropicKey;
         view.querySelector('#anthropicApiKey').placeholder = serverHasAnthropicKey
-            ? 'Cle enregistree (laisser vide pour la garder)'
+            ? 'Clé enregistrée (laisser vide pour la garder)'
             : 'sk-ant-...';
     }
 
@@ -903,14 +903,14 @@ define([], function () {
 
     function doTranslate(view) {
         if (!currentMovie) {
-            showMessage(view, '#translateResult', 'warning', 'Choisissez d\'abord un film ou un episode.');
+            showMessage(view, '#translateResult', 'warning', 'Choisissez d\'abord un film ou un épisode.');
             return;
         }
 
         var sourceEl = view.querySelector('#translateSource');
         var sourceValue = sourceEl.value;
         if (!sourceValue) {
-            showMessage(view, '#translateResult', 'warning', 'Choisissez le sous-titre a traduire.');
+            showMessage(view, '#translateResult', 'warning', 'Choisissez le sous-titre à traduire.');
             return;
         }
 
@@ -930,7 +930,7 @@ define([], function () {
         saveSettings(view, settings);
 
         if (engine === 'claude' && !anthropicKey && !serverHasAnthropicKey) {
-            showMessage(view, '#translateResult', 'warning', 'Le moteur Claude demande une cle API Anthropic. Sans cle, choisissez Google Traduction (gratuit).');
+            showMessage(view, '#translateResult', 'warning', 'Le moteur Claude demande une clé API Anthropic. Sans clé, choisissez Google Traduction (gratuit).');
             return;
         }
 
@@ -994,7 +994,7 @@ define([], function () {
 
                 if (!data.Found) {
                     stopFollowingTranslation(view);
-                    showMessage(view, '#translateResult', 'error', 'Tache de traduction introuvable ou expiree.');
+                    showMessage(view, '#translateResult', 'error', 'Tâche de traduction introuvable ou expirée.');
                     return;
                 }
 
@@ -1013,15 +1013,15 @@ define([], function () {
                     var html = '<strong>' + escapeHtml(data.Message) + '</strong><br><small>'
                         + escapeHtml(data.MergedPath || data.OutputPath) + '</small>';
                     if (data.Untranslated > 0) {
-                        html += '<br><span style="color:#ff9800;">' + data.Untranslated + ' replique(s) non traduite(s), texte d\'origine conserve</span>';
+                        html += '<br><span style="color:#ff9800;">' + data.Untranslated + ' réplique(s) non traduite(s), texte d\'origine conservé</span>';
                     }
                     if (data.InputTokens > 0) {
-                        html += '<br><small style="color:#888;">' + data.InputTokens + ' tokens entree / ' + data.OutputTokens + ' sortie</small>';
+                        html += '<br><small style="color:#888;">' + data.InputTokens + ' tokens entrée / ' + data.OutputTokens + ' sortie</small>';
                     }
 
                     showProducedThenRefresh(view, '#translateResult', itemId, html);
                 } else if (data.Status === 'Cancelled') {
-                    showMessage(view, '#translateResult', 'warning', 'Traduction annulee.');
+                    showMessage(view, '#translateResult', 'warning', 'Traduction annulée.');
                 } else {
                     showMessage(view, '#translateResult', 'error', data.Error || 'Erreur inconnue');
                 }
@@ -1034,7 +1034,7 @@ define([], function () {
                 translationPollFailures++;
                 if (translationPollFailures >= 10) {
                     stopFollowingTranslation(view);
-                    showMessage(view, '#translateResult', 'error', 'Suivi interrompu : le serveur ne repond plus. La traduction continue peut-etre cote serveur.');
+                    showMessage(view, '#translateResult', 'error', 'Suivi interrompu : le serveur ne répond plus. La traduction continue peut-être côté serveur.');
                     return;
                 }
                 schedulePoll(view, 5000);
@@ -1044,7 +1044,7 @@ define([], function () {
     function cancelTranslation(view) {
         if (!currentTranslationJob) return;
 
-        view.querySelector('#translateProgressLabel').textContent = 'Annulation demandee...';
+        view.querySelector('#translateProgressLabel').textContent = 'Annulation demandée...';
 
         postPlugin('TranslateCancel', { JobId: currentTranslationJob }).catch(function (e) {
             console.error('[SubMerger] Cancel error:', e);
@@ -1070,8 +1070,8 @@ define([], function () {
                     messages.push('<strong>ffmpeg ou ffprobe est introuvable sur le serveur.</strong> La normalisation ne peut pas fonctionner sans eux.');
                 }
                 if (!data.MkvPropEditAvailable) {
-                    messages.push('<strong>MKVToolNix n\'est pas installe sur le serveur.</strong> Tout fonctionne sauf la modification du titre des pistes integrees aux .mkv (ajout ou retrait de la note). '
-                        + 'Sur un Synology : Centre de paquets, source <em>https://packages.synocommunity.com</em>, paquet MKVToolNix. Ce message disparaitra une fois le paquet installe.');
+                    messages.push('<strong>MKVToolNix n\'est pas installé sur le serveur.</strong> Tout fonctionne sauf la modification du titre des pistes intégrées aux .mkv (ajout ou retrait de la note). '
+                        + 'Sur un Synology : Centre de paquets, source <em>https://packages.synocommunity.com</em>, paquet MKVToolNix. Ce message disparaîtra une fois le paquet installé.');
                 }
 
                 tagMkv.disabled = !data.MkvPropEditAvailable;
@@ -1157,7 +1157,7 @@ define([], function () {
             var wholeLibrary = normalizeTarget === 'library'
                 || view.querySelector(batch ? '#batchScope' : '#normalizeScope').value === 'all';
             if (!wholeLibrary && !currentMovie) {
-                normalizeUi(view, 'result').innerHTML = statusBox('warning', 'Selectionnez d\'abord un film ou un episode, ou choisissez "Toutes les mediatheques".');
+                normalizeUi(view, 'result').innerHTML = statusBox('warning', 'Sélectionnez d\'abord un film ou un épisode, ou choisissez "Toutes les médiathèques".');
                 return;
             }
 
@@ -1207,7 +1207,7 @@ define([], function () {
 
         setNormalizeRunning(view, true);
         normalizeUi(view, 'bar').style.width = '0%';
-        normalizeUi(view, 'label').textContent = 'Preparation...';
+        normalizeUi(view, 'label').textContent = 'Préparation...';
         box.innerHTML = '';
 
         postPlugin('Normalize', body)
@@ -1252,7 +1252,7 @@ define([], function () {
 
                 if (!data.Found) {
                     stopFollowingNormalize(view);
-                    box.innerHTML = statusBox('error', 'Tache introuvable ou expiree.');
+                    box.innerHTML = statusBox('error', 'Tâche introuvable ou expirée.');
                     return;
                 }
 
@@ -1275,7 +1275,7 @@ define([], function () {
                 normalizePollFailures++;
                 if (normalizePollFailures >= 10) {
                     stopFollowingNormalize(view);
-                    box.innerHTML = statusBox('error', 'Suivi interrompu : le serveur ne repond plus. La tache continue peut-etre cote serveur.');
+                    box.innerHTML = statusBox('error', 'Suivi interrompu : le serveur ne répond plus. La tâche continue peut-être côté serveur.');
                     return;
                 }
                 scheduleNormalizePoll(view, 5000);
@@ -1288,7 +1288,7 @@ define([], function () {
             : (data.Cleanup ? normalizeUi(view, 'cleanupApply') : view.querySelector('#btnNormalizeApply'));
 
         if (data.Status === 'Cancelled') {
-            box.innerHTML = statusBox('warning', data.BatchMerge ? 'Fusion en serie annulee.' : (data.Cleanup ? 'Nettoyage annule.' : 'Normalisation annulee.'));
+            box.innerHTML = statusBox('warning', data.BatchMerge ? 'Fusion en série annulée.' : (data.Cleanup ? 'Nettoyage annulé.' : 'Normalisation annulée.'));
             return;
         }
         if (data.Status !== 'Completed') {
@@ -1299,35 +1299,35 @@ define([], function () {
         var changes = data.Created + data.Renamed + data.Tagged + data.Deleted + (data.Merged || 0);
         var summary;
         if (data.BatchMerge) {
-            var without = data.Unmatched > 0 ? ' ' + data.Unmatched + ' video(s) n\'ont pas les deux langues.' : '';
+            var without = data.Unmatched > 0 ? ' ' + data.Unmatched + ' vidéo(s) n\'ont pas les deux langues.' : '';
             if (changes === 0 && data.Failures === 0) {
-                summary = 'Rien a creer sur ' + data.Total + ' video(s) : les bilingues existent deja, ou les deux langues manquent.' + without;
+                summary = 'Rien à créer sur ' + data.Total + ' vidéo(s) : les bilingues existent déjà, ou les deux langues manquent.' + without;
             } else if (data.DryRun) {
-                summary = 'Apercu : ' + data.Merged + ' bilingue(s) a creer sur ' + data.Total + ' video(s).' + without;
+                summary = 'Aperçu : ' + data.Merged + ' bilingue(s) à créer sur ' + data.Total + ' vidéo(s).' + without;
             } else {
-                summary = data.Merged + ' bilingue(s) cree(s), ' + data.Failures + ' echec(s).' + without;
-                if (changes > 0) summary += ' Analyse de la mediatheque demandee.';
+                summary = data.Merged + ' bilingue(s) créé(s), ' + data.Failures + ' échec(s).' + without;
+                if (changes > 0) summary += ' Analyse de la médiathèque demandée.';
             }
         } else if (data.Cleanup) {
             var notes = data.Renamed + data.Tagged;
             if (changes === 0 && data.Failures === 0) {
-                summary = 'Rien a nettoyer (' + data.Total + ' video(s) examinees).';
+                summary = 'Rien à nettoyer (' + data.Total + ' vidéo(s) examinées).';
             } else if (data.DryRun) {
-                summary = 'Apercu : ' + data.Deleted + ' fichier(s) a supprimer'
-                    + (notes > 0 ? ', ' + data.Renamed + ' fichier(s) a renommer et ' + data.Tagged + ' titre(s) de piste a raccourcir' : '') + '.';
+                summary = 'Aperçu : ' + data.Deleted + ' fichier(s) à supprimer'
+                    + (notes > 0 ? ', ' + data.Renamed + ' fichier(s) à renommer et ' + data.Tagged + ' titre(s) de piste à raccourcir' : '') + '.';
             } else {
-                summary = data.Deleted + ' fichier(s) supprime(s), '
-                    + (notes > 0 ? data.Renamed + ' fichier(s) renomme(s), ' + data.Tagged + ' titre(s) de piste raccourci(s), ' : '')
-                    + data.Failures + ' echec(s).';
-                if (changes > 0) summary += ' Analyse de la mediatheque demandee.';
+                summary = data.Deleted + ' fichier(s) supprimé(s), '
+                    + (notes > 0 ? data.Renamed + ' fichier(s) renommé(s), ' + data.Tagged + ' titre(s) de piste raccourci(s), ' : '')
+                    + data.Failures + ' échec(s).';
+                if (changes > 0) summary += ' Analyse de la médiathèque demandée.';
             }
         } else if (changes === 0 && data.Failures === 0) {
-            summary = 'Rien a faire : aucun sous-titre a convertir, renommer ou annoter (' + data.Total + ' fichier(s) examines).';
+            summary = 'Rien à faire : aucun sous-titre à convertir, renommer ou annoter (' + data.Total + ' fichier(s) examinés).';
         } else if (data.DryRun) {
-            summary = 'Apercu : ' + data.Created + ' .srt a creer, ' + data.Renamed + ' fichier(s) a renommer, ' + data.Tagged + ' piste(s) a annoter.';
+            summary = 'Aperçu : ' + data.Created + ' .srt à créer, ' + data.Renamed + ' fichier(s) à renommer, ' + data.Tagged + ' piste(s) à annoter.';
         } else {
-            summary = data.Created + ' .srt cree(s), ' + data.Renamed + ' fichier(s) renomme(s), ' + data.Tagged + ' piste(s) annotee(s), ' + data.Failures + ' echec(s).';
-            if (changes > 0) summary += ' Analyse de la mediatheque demandee.';
+            summary = data.Created + ' .srt créé(s), ' + data.Renamed + ' fichier(s) renommé(s), ' + data.Tagged + ' piste(s) annotée(s), ' + data.Failures + ' échec(s).';
+            if (changes > 0) summary += ' Analyse de la médiathèque demandée.';
         }
         if (data.ImageTracks > 0) {
             summary += ' ' + data.ImageTracks + ' sous-titre(s) image (PGS/VOBSUB) non convertis.';
@@ -1338,7 +1338,7 @@ define([], function () {
                 : ((action.Kind === 'Info' || action.Kind === 'Delete') ? '#ff9800' : '#4CAF50');
             var detail = action.Detail || '';
             if (action.Kind === 'Delete' && action.Status !== 'Failed') {
-                detail = (data.DryRun ? 'A supprimer : ' : 'Supprime : ') + detail;
+                detail = (data.DryRun ? 'À supprimer : ' : 'Supprimé : ') + detail;
             }
             var target = action.Target ? ' &rarr; <strong>' + escapeHtml(action.Target) + '</strong>' : '';
             return '<div style="padding:6px 8px; margin:4px 0; background:rgba(0,0,0,0.3); border-left:3px solid ' + color + '; border-radius:4px; font-size:0.85em;">'
@@ -1347,11 +1347,11 @@ define([], function () {
         }).join('');
 
         var listed = data.ActionsTruncated
-            ? '<p style="color: inherit; opacity: 0.75; font-size:0.85em;">Seules les ' + data.Actions.length + ' premieres lignes sont affichees ; les totaux ci-dessus sont complets.</p>'
+            ? '<p style="color: inherit; opacity: 0.75; font-size:0.85em;">Seules les ' + data.Actions.length + ' premières lignes sont affichées ; les totaux ci-dessus sont complets.</p>'
             : '';
 
         var joined = normalizeJoined
-            ? statusBox('warning', 'Une autre normalisation ou un autre nettoyage etait deja en cours : voici son resultat. Relancez votre demande.')
+            ? statusBox('warning', 'Une autre normalisation ou un autre nettoyage était déjà en cours : voici son résultat. Relancez votre demande.')
             : '';
 
         box.innerHTML = joined + statusBox(data.Failures > 0 ? 'warning' : 'ok', '<strong>' + summary + '</strong>') + rows + listed;
@@ -1459,7 +1459,7 @@ define([], function () {
     }
 
     return function (view) {
-        console.log('[SubMerger] Controller init v9.13.0');
+        console.log('[SubMerger] Controller init v9.14.0');
 
         var bound = false;
 
@@ -1497,7 +1497,7 @@ define([], function () {
                 pollTranslation(view);
             } else {
                 if (!currentMovie) {
-                    log(view, 'Choisissez une mediatheque puis cliquez sur "Charger la liste".');
+                    log(view, 'Choisissez une médiathèque puis cliquez sur "Charger la liste".');
                 }
             }
         });
