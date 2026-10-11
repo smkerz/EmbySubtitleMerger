@@ -25,7 +25,64 @@ namespace EmbySubtitleMerger.Subtitles
     }
 
     /// <summary>
-    /// Traduit un fichier SRT complet via l'API Claude.
+    /// Un service de traduction : il reçoit un lot de répliques numérotées et rend leurs traductions
+    /// sous les mêmes numéros. Les langues sont fixées à la création du moteur.
+    /// </summary>
+    public interface ITranslationEngine : IDisposable
+    {
+        /// <param name="context">Répliques précédentes déjà traduites, pour la continuité ; les moteurs sans mémoire l'ignorent</param>
+        Task<TranslationBatchResult> TranslateBatchAsync(
+            IReadOnlyList<TranslationItem> batch,
+            IReadOnlyList<TranslationItem> context,
+            CancellationToken cancellationToken = default);
+    }
+
+    /// <summary>
+    /// Moteurs de traduction proposés
+    /// </summary>
+    public static class TranslationEngines
+    {
+        /// <summary>API Claude : payante, tient compte du contexte, nécessite une clé</summary>
+        public const string Claude = "claude";
+
+        /// <summary>Service web de Google Traduction : gratuit, sans clé, non officiel</summary>
+        public const string Google = "google";
+
+        public static bool IsKnown(string? name) => name == Claude || name == Google;
+
+        public static ITranslationEngine Create(string name, string? apiKey, string? model, string? sourceLanguage, string targetLanguage)
+        {
+            if (name == Google)
+                return new GoogleTranslateClient(sourceLanguage, targetLanguage);
+
+            return new ClaudeEngine(apiKey ?? string.Empty, model, sourceLanguage, targetLanguage);
+        }
+
+        private sealed class ClaudeEngine : ITranslationEngine
+        {
+            private readonly ClaudeTranslationClient _client;
+            private readonly string _sourceName;
+            private readonly string _targetName;
+
+            public ClaudeEngine(string apiKey, string? model, string? sourceLanguage, string targetLanguage)
+            {
+                _client = new ClaudeTranslationClient(apiKey, model);
+                _sourceName = SubtitleTranslator.LanguageName(sourceLanguage);
+                _targetName = SubtitleTranslator.LanguageName(targetLanguage);
+            }
+
+            public Task<TranslationBatchResult> TranslateBatchAsync(
+                IReadOnlyList<TranslationItem> batch, IReadOnlyList<TranslationItem> context, CancellationToken cancellationToken = default)
+            {
+                return _client.TranslateBatchAsync(batch, context, _sourceName, _targetName, cancellationToken);
+            }
+
+            public void Dispose() => _client.Dispose();
+        }
+    }
+
+    /// <summary>
+    /// Traduit un fichier SRT complet avec le moteur choisi.
     ///
     /// Le point délicat est l'alignement : une traduction naïve fusionne ou découpe
     /// les répliques et fait perdre le timing. On envoie donc les répliques numérotées,
@@ -45,18 +102,12 @@ namespace EmbySubtitleMerger.Subtitles
         /// </summary>
         public static async Task<List<SubtitleCue>> TranslateCuesAsync(
             IReadOnlyList<SubtitleCue> cues,
-            string? sourceLanguage,
-            string targetLanguage,
-            string apiKey,
-            string? model = null,
+            ITranslationEngine engine,
             int batchSize = DefaultBatchSize,
             TranslationJob? job = null,
             CancellationToken cancellationToken = default)
         {
             if (cues == null) throw new ArgumentNullException(nameof(cues));
-
-            var sourceName = LanguageName(sourceLanguage);
-            var targetName = LanguageName(targetLanguage);
 
             // Copie profonde : on ne modifie jamais les cues d'origine
             var translated = cues.Select(c => new SubtitleCue
@@ -69,8 +120,6 @@ namespace EmbySubtitleMerger.Subtitles
 
             if (translated.Count == 0)
                 return translated;
-
-            using var client = new ClaudeTranslationClient(apiKey, model);
 
             // Id = position dans la liste, stable et indépendant de l'index SRT d'origine
             var items = translated
@@ -88,8 +137,7 @@ namespace EmbySubtitleMerger.Subtitles
                     .Skip(Math.Max(0, previousBatchTranslations.Count - ContextSize))
                     .ToList();
 
-                var result = await client.TranslateBatchAsync(
-                    batch, context, sourceName, targetName, cancellationToken);
+                var result = await engine.TranslateBatchAsync(batch, context, cancellationToken);
 
                 if (!result.Success)
                     throw new InvalidOperationException(result.Error ?? "Échec de la traduction du lot.");
@@ -106,8 +154,7 @@ namespace EmbySubtitleMerger.Subtitles
                 {
                     Plugin.Log($"[Translate] {missing.Count} réplique(s) manquante(s) sur le lot {offset}-{offset + batch.Count - 1}, nouvelle tentative");
 
-                    var retry = await client.TranslateBatchAsync(
-                        missing, context, sourceName, targetName, cancellationToken);
+                    var retry = await engine.TranslateBatchAsync(missing, context, cancellationToken);
 
                     if (retry.Success)
                     {
@@ -164,7 +211,8 @@ namespace EmbySubtitleMerger.Subtitles
             string outputPath,
             string? sourceLanguage,
             string targetLanguage,
-            string apiKey,
+            string engineName,
+            string? apiKey,
             string? model,
             int batchSize,
             Action<List<SubtitleCue>, List<SubtitleCue>>? afterTranslation = null)
@@ -182,9 +230,9 @@ namespace EmbySubtitleMerger.Subtitles
 
                 job.Message = $"Traduction de {cues.Count} répliques…";
 
-                var translated = await TranslateCuesAsync(
-                    cues, sourceLanguage, targetLanguage, apiKey, model,
-                    batchSize, job, job.Cancellation.Token);
+                using var engine = TranslationEngines.Create(engineName, apiKey, model, sourceLanguage, targetLanguage);
+
+                var translated = await TranslateCuesAsync(cues, engine, batchSize, job, job.Cancellation.Token);
 
                 SrtParser.WriteFile(outputPath, translated);
 

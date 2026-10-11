@@ -149,17 +149,20 @@ namespace EmbySubtitleMerger.Subtitles
 
         /// <summary>
         /// Film.fre.srt devient Film.Normalisé-pour-Emby.fre.srt.
-        /// Avec newExtension, l'extension est remplacée (Film.rus.ass devient ….rus.srt).
+        /// Avec newExtension, l'extension est remplacée (Film.rus.ass devient ….rus.srt, Film.ass devient ….srt).
+        /// Le sous-titre doit appartenir à la vidéo (son nom commence par celui de la vidéo).
         /// </summary>
         public static string PathWithNote(string subtitlePath, string videoPath, string? newExtension = null)
         {
             var stem = Path.GetFileNameWithoutExtension(videoPath);
-            var rest = Path.GetFileName(subtitlePath).Substring(stem.Length + 1);   // "fre.srt" ou "srt"
-
+            var name = Path.GetFileName(subtitlePath);
             if (newExtension != null)
-                rest = rest.Substring(0, rest.Length - Path.GetExtension(subtitlePath).Length) + newExtension;
+                name = Path.GetFileNameWithoutExtension(name) + newExtension;
 
-            return Sibling(subtitlePath, $"{stem}.{FileNoteBase}.{rest}");
+            // ".fre.srt", ou ".srt" quand le sous-titre n'a pas de code de langue
+            var rest = name.StartsWith(stem + ".", StringComparison.Ordinal) ? name.Substring(stem.Length) : "." + name;
+
+            return Sibling(subtitlePath, $"{stem}.{FileNoteBase}{rest}");
         }
 
         /// <summary>

@@ -73,6 +73,14 @@ namespace EmbySubtitleMerger
         public string DefaultLanguage2 { get; set; } = "fr";
         public string OutputFormat { get; set; } = "srt";
 
+        public const string DefaultNormalizeLanguages = "en,fr,ru";
+
+        /// <summary>
+        /// Langues converties par la tâche planifiée de normalisation : celles de la dernière
+        /// normalisation de toutes les médiathèques lancée depuis la page.
+        /// </summary>
+        public string NormalizeLanguages { get; set; } = DefaultNormalizeLanguages;
+
         /// <summary>Clé API Anthropic utilisée pour la traduction quand la page n'en fournit pas</summary>
         public string AnthropicApiKey { get; set; } = string.Empty;
 

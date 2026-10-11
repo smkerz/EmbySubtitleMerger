@@ -312,14 +312,27 @@ namespace EmbySubtitleMerger.Subtitles
                 cancellationToken.ThrowIfCancellationRequested();
                 job.Message = Path.GetFileName(video);
 
-                if (options.Cleanup)
+                try
                 {
-                    await CleanupVideoAsync(job, video, files, owners, options, cancellationToken);
+                    if (options.Cleanup)
+                    {
+                        await CleanupVideoAsync(job, video, files, owners, options, cancellationToken);
+                    }
+                    else
+                    {
+                        MigrateLegacyNames(job, video, files, options);
+                        await ProcessVideoAsync(job, video, files, owners, options, cancellationToken);
+                    }
                 }
-                else
+                catch (OperationCanceledException)
                 {
-                    MigrateLegacyNames(job, video, files, options);
-                    await ProcessVideoAsync(job, video, files, owners, options, cancellationToken);
+                    throw;
+                }
+                catch (Exception ex)
+                {
+                    // Une vidéo en erreur n'arrête pas le parcours de toute la médiathèque
+                    job.Add(NormalizeAction.Info, NormalizeAction.Failed, video, null, $"erreur inattendue : {ex.Message}");
+                    Plugin.Log($"[Normalize] ERREUR sur {video}: {ex}");
                 }
 
                 job.Processed++;
@@ -444,7 +457,7 @@ namespace EmbySubtitleMerger.Subtitles
 
             if (!options.CleanupNote) return;
 
-            RemoveNoteFromFiles(job, video, noted.Where(f => !toDelete.ContainsKey(f)).ToList(), files, options);
+            RemoveNoteFromFiles(job, video, noted.Where(f => !toDelete.ContainsKey(f)).ToList(), files, owners, options);
 
             if (string.IsNullOrEmpty(options.MkvPropEditPath) || !NormalizeNaming.IsMkv(video)) return;
 
@@ -459,12 +472,14 @@ namespace EmbySubtitleMerger.Subtitles
         /// <summary>
         /// Les .srt d'origine renommés avec la note reprennent leur nom. Aucun fichier n'est supprimé.
         /// </summary>
-        private static void RemoveNoteFromFiles(NormalizeJob job, string video, List<string> notedSrts, List<string> files, NormalizeOptions options)
+        private static void RemoveNoteFromFiles(
+            NormalizeJob job, string video, List<string> notedSrts, List<string> files, OwnerIndex owners, NormalizeOptions options)
         {
             // La conversion d'un .ass posé à côté de la vidéo garde la note : sans elle,
             // la normalisation ne la reconnaîtrait plus et la referait
             var externalConversions = new HashSet<string>(
-                files.Where(NormalizeNaming.IsStyledSubtitleFile).Select(f => NormalizeNaming.PathWithNote(f, video, ".srt")),
+                files.Where(f => NormalizeNaming.IsStyledSubtitleFile(f) && owners.Of(f) == video)
+                    .Select(f => NormalizeNaming.PathWithNote(f, video, ".srt")),
                 StringComparer.Ordinal);
 
             foreach (var srt in notedSrts)

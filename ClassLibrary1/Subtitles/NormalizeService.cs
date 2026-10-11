@@ -138,7 +138,7 @@ namespace EmbySubtitleMerger.Subtitles
     public class NormalizeService : IService
     {
         /// <summary>Langues converties quand la requête n'en précise pas, comme dans le script d'origine</summary>
-        private const string DefaultLanguages = "en,fr,ru";
+        private const string DefaultLanguages = PluginConfiguration.DefaultNormalizeLanguages;
 
         private readonly ILibraryManager _libraryManager;
 
@@ -214,6 +214,16 @@ namespace EmbySubtitleMerger.Subtitles
 
                 if (options.TagMkvTracks && options.MkvPropEditPath == null)
                     return Fail("mkvpropedit (MKVToolNix) n'est pas installé sur le serveur : les pistes des .mkv ne peuvent pas être annotées.");
+
+                // La tâche planifiée reprend les langues de la dernière normalisation complète
+                var plugin = Plugin.Instance;
+                var chosen = string.Join(",", options.Languages);
+                if (plugin != null && !options.Cleanup && !options.DryRun && options.VideoPath == null
+                    && plugin.Configuration.NormalizeLanguages != chosen)
+                {
+                    plugin.Configuration.NormalizeLanguages = chosen;
+                    plugin.SaveConfiguration();
+                }
 
                 var folders = options.VideoPath == null ? LibraryFolders.All(_libraryManager) : new List<string>();
                 var job = JobStore<NormalizeJob>.Add(new NormalizeJob { DryRun = options.DryRun, Cleanup = options.Cleanup });

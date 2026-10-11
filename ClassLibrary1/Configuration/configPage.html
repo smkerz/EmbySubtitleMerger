@@ -10,7 +10,7 @@
          data-controller="configurationpage?name=subtitlemerger.js">
         <div data-role="content">
             <div class="content-primary">
-                <h1>Subtitle Merger <span style="font-size:0.5em; color:#888;">v9.9.0</span></h1>
+                <h1>Subtitle Merger <span style="font-size:0.5em; color:#888;">v9.10.0</span></h1>
 
                 <style>
                     .merger-card { background: rgba(0,0,0,0.2); border-radius: 8px; padding: 15px; margin-bottom: 15px; }
@@ -198,6 +198,11 @@
                                 <div class="progress-fill indeterminate"></div>
                             </div>
                             <span id="mergeProgressLabel" class="progress-label">Fusion en cours...</span>
+                            <div class="merger-actions" style="margin-top:10px;">
+                                <button id="btnMergeCancel" type="button" is="emby-button" class="raised">
+                                    <span>Annuler</span>
+                                </button>
+                            </div>
                         </div>
 
                         <div id="result" class="merger-result"></div>
@@ -254,11 +259,23 @@
                                 </select>
                             </div>
                             <div class="option-group">
+                                <label for="translateEngine">Moteur de traduction:</label>
+                                <select id="translateEngine" is="emby-select">
+                                    <option value="google">Google Traduction (gratuit, sans cle)</option>
+                                    <option value="claude">Claude (payant, meilleure qualite)</option>
+                                </select>
+                            </div>
+                            <div class="option-group" id="anthropicKeyGroup" style="display:none;">
                                 <label for="anthropicApiKey">Cle API Anthropic (memorisee dans ce navigateur):</label>
                                 <input type="password" id="anthropicApiKey" class="merger-text-input" placeholder="sk-ant-..." style="font-family:monospace;">
                             </div>
                         </div>
-                        <p class="merger-help" style="margin-top:8px;">
+                        <p id="engineHelpGoogle" class="merger-help" style="margin-top:8px;">
+                            Gratuit, sans compte. Traduit phrase par phrase, sans le contexte du film : correct pour suivre, moins naturel que Claude,
+                            et l'italique est perdu. Service non officiel de Google : il peut refuser les demandes apres plusieurs films a la suite.
+                        </p>
+                        <p id="engineHelpClaude" class="merger-help" style="margin-top:8px; display:none;">
+                            Payant a l'usage (quelques dizaines de centimes par film). Tient compte du contexte et du ton.
                             Obtenez une cle sur <a href="https://console.anthropic.com/settings/keys" target="_blank" style="color:#00a4dc;">console.anthropic.com</a>.
                         </p>
 
@@ -296,6 +313,9 @@
                             Cet outil les convertit en fichiers <em>.srt</em> poses a cote des videos, avec la note
                             "Normalise-pour-Emby" visible dans le lecteur. Une piste n'est pas convertie si la video contient deja
                             un sous-titre texte dans la meme langue. L'image et le son des videos ne sont jamais reecrits.
+                            <br>Pour le faire automatiquement, par exemple chaque nuit : dans Emby, <em>Taches planifiees</em>, section
+                            <em>Subtitle Merger</em>, ajoutez un declencheur. La tache reprend les langues de votre derniere normalisation
+                            de toutes les mediatheques.
                         </p>
 
                         <div id="normalizeTools" class="status-box status-warning" style="display:none;"></div>

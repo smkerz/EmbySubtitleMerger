@@ -32,7 +32,10 @@ namespace EmbySubtitleMerger.Subtitles
         /// <summary>Code langue cible (ex: fr)</summary>
         public string? TargetLanguage { get; set; }
 
-        /// <summary>Clé API Anthropic. À défaut, celle de la configuration du plugin est utilisée</summary>
+        /// <summary>Moteur : "claude" (défaut, payant, avec clé) ou "google" (gratuit, sans clé)</summary>
+        public string? Engine { get; set; }
+
+        /// <summary>Clé API Anthropic pour le moteur Claude. À défaut, celle de la configuration du plugin est utilisée</summary>
         public string? AnthropicApiKey { get; set; }
 
         /// <summary>Modèle à utiliser. À défaut, celui de la configuration du plugin</summary>
@@ -131,8 +134,12 @@ namespace EmbySubtitleMerger.Subtitles
                 if (target == null)
                     return Fail($"Langue cible inconnue: {targetCode}");
 
+                var engine = string.IsNullOrWhiteSpace(request.Engine) ? TranslationEngines.Claude : request.Engine!.Trim().ToLowerInvariant();
+                if (!TranslationEngines.IsKnown(engine))
+                    return Fail($"Moteur de traduction inconnu: {request.Engine}");
+
                 var apiKey = FirstNonBlank(request.AnthropicApiKey, config?.AnthropicApiKey);
-                if (apiKey == null)
+                if (engine == TranslationEngines.Claude && apiKey == null)
                     return Fail("Clé API Anthropic requise.");
 
                 var sourceLanguage = SubtitleNaming.Resolve(request.SourceLanguage);
@@ -159,7 +166,7 @@ namespace EmbySubtitleMerger.Subtitles
 
                 var job = JobStore<TranslationJob>.Add(new TranslationJob());
 
-                Plugin.Log($"[Translate] Job {job.Id}: {Path.GetFileName(videoPath)} -> {target.Code}, lots de {batchSize}");
+                Plugin.Log($"[Translate] Job {job.Id}: {Path.GetFileName(videoPath)} -> {target.Code}, moteur {engine}, lots de {batchSize}");
 
                 // Exécution en tâche de fond, suivi via /TranslateStatus. L'extraction de la piste en fait
                 // partie : sur un gros film elle dure plusieurs minutes, trop pour la requête de lancement.
@@ -196,7 +203,7 @@ namespace EmbySubtitleMerger.Subtitles
                     try
                     {
                         await SubtitleTranslator.RunJobAsync(
-                            job, source.Path, outputPath, sourceCode, targetCode, apiKey, model, batchSize,
+                            job, source.Path, outputPath, sourceCode, targetCode, engine, apiKey, model, batchSize,
                             mergeOptions == null
                                 ? null
                                 : (sourceCues, translatedCues) => WriteBilingual(

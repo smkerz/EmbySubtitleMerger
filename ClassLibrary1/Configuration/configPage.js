@@ -1,7 +1,7 @@
 define([], function () {
     'use strict';
 
-    console.log('[SubMerger] Module loaded v9.9.0');
+    console.log('[SubMerger] Module loaded v9.10.0');
 
     var allMovies = [];      // Tous les medias charges
     var filteredMovies = []; // Medias filtres
@@ -681,6 +681,14 @@ define([], function () {
         }
     }
 
+    function cancelMerge() {
+        if (!mergeJob) return;
+
+        postPlugin('MergeCancel', { JobId: mergeJob }).catch(function (e) {
+            console.error('[SubMerger] Merge cancel error:', e);
+        });
+    }
+
     function pollMerge(view) {
         // Un seul suivi a la fois, meme apres un aller-retour rapide hors de la page
         clearTimeout(mergePollTimer);
@@ -837,6 +845,14 @@ define([], function () {
         box.style.display = message ? 'block' : 'none';
     }
 
+    // Le champ de la cle et le texte d'aide suivent le moteur choisi
+    function showTranslateEngine(view) {
+        var claude = view.querySelector('#translateEngine').value === 'claude';
+        view.querySelector('#anthropicKeyGroup').style.display = claude ? '' : 'none';
+        view.querySelector('#engineHelpClaude').style.display = claude ? 'block' : 'none';
+        view.querySelector('#engineHelpGoogle').style.display = claude ? 'none' : 'block';
+    }
+
     function doTranslate(view) {
         if (!currentMovie) {
             showMessage(view, '#translateResult', 'warning', 'Choisissez d\'abord un film ou un episode.');
@@ -858,11 +874,18 @@ define([], function () {
 
 
         // La cle n'est memorisee que dans ce navigateur ; vider le champ l'oublie
+        var engine = view.querySelector('#translateEngine').value;
         var anthropicKey = view.querySelector('#anthropicApiKey').value.trim();
         if (anthropicKey) {
             localStorage.setItem('anthropic_api_key', anthropicKey);
         } else {
             localStorage.removeItem('anthropic_api_key');
+        }
+        localStorage.setItem('submerger_engine', engine);
+
+        if (engine === 'claude' && !anthropicKey) {
+            showMessage(view, '#translateResult', 'warning', 'Le moteur Claude demande une cle API Anthropic. Sans cle, choisissez Google Traduction (gratuit).');
+            return;
         }
 
         var itemId = currentMovie.Id;
@@ -877,6 +900,7 @@ define([], function () {
             SourcePath: selected.dataset.path || '',
             SourceLanguage: selected.dataset.lang || '',
             TargetLanguage: view.querySelector('#targetLanguage').value,
+            Engine: engine,
             AnthropicApiKey: anthropicKey,
             ThenMerge: view.querySelector('#translateThenMerge').checked,
             MergeMode: view.querySelector('#mergeMode').value,
@@ -944,7 +968,9 @@ define([], function () {
                     if (data.Untranslated > 0) {
                         html += '<br><span style="color:#ff9800;">' + data.Untranslated + ' replique(s) non traduite(s), texte d\'origine conserve</span>';
                     }
-                    html += '<br><small style="color:#888;">' + data.InputTokens + ' tokens entree / ' + data.OutputTokens + ' sortie</small>';
+                    if (data.InputTokens > 0) {
+                        html += '<br><small style="color:#888;">' + data.InputTokens + ' tokens entree / ' + data.OutputTokens + ' sortie</small>';
+                    }
 
                     showProducedThenRefresh(view, '#translateResult', itemId, html);
                 } else if (data.Status === 'Cancelled') {
@@ -1373,6 +1399,8 @@ define([], function () {
         on('#btnLibCleanupPreview', 'click', function () { startNormalize(view, true, true, true); });
         on('#btnLibCleanupApply', 'click', function () { startNormalize(view, false, true, true); });
         on('#btnLibCancel', 'click', function () { cancelNormalize(); });
+        on('#btnMergeCancel', 'click', function () { cancelMerge(); });
+        on('#translateEngine', 'change', function () { showTranslateEngine(view); });
 
         ['#normalizeScope', '#normalizeLanguages', '#normalizeAnnotate', '#normalizeTagMkv', '#normalizeExtract', '#normalizeOverwrite',
             '#cleanupConversions', '#cleanupBilingual', '#cleanupNote',
@@ -1396,7 +1424,7 @@ define([], function () {
     }
 
     return function (view) {
-        console.log('[SubMerger] Controller init v9.9.0');
+        console.log('[SubMerger] Controller init v9.10.0');
 
         var bound = false;
 
@@ -1411,6 +1439,12 @@ define([], function () {
                 bound = true;
                 bindEvents(view);
             }
+
+            var savedEngine = localStorage.getItem('submerger_engine');
+            if (savedEngine === 'claude' || savedEngine === 'google') {
+                view.querySelector('#translateEngine').value = savedEngine;
+            }
+            showTranslateEngine(view);
 
             var savedAnthropicKey = localStorage.getItem('anthropic_api_key');
             var anthropicInput = view.querySelector('#anthropicApiKey');

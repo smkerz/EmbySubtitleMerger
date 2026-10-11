@@ -3,6 +3,7 @@ using System.IO;
 using System.Net;
 using System.Text;
 using System.Text.Json;
+using System.Threading;
 using System.Threading.Tasks;
 using MediaBrowser.Model.Services;
 
@@ -81,6 +82,15 @@ namespace EmbySubtitleMerger.Subtitles
     /// </summary>
     [Route("/EmbySubtitleMerger/MergeStatus", "GET")]
     public class GetMergeStatusRequest : IReturn<MergeSubtitlesResponse>
+    {
+        public string? JobId { get; set; }
+    }
+
+    /// <summary>
+    /// Arrête une fusion en cours (l'extraction des pistes d'un gros film dure plusieurs minutes)
+    /// </summary>
+    [Route("/EmbySubtitleMerger/MergeCancel", "POST")]
+    public class CancelMergeRequest : IReturn<MergeSubtitlesResponse>
     {
         public string? JobId { get; set; }
     }
@@ -275,13 +285,13 @@ namespace EmbySubtitleMerger.Subtitles
         public async Task<object> Post(MergeSubtitlesRequest request)
         {
             if (!request.Background)
-                return await RunMergeAsync(request, null);
+                return await RunMergeAsync(request, null, default);
 
             var job = JobStore<MergeJob>.Add(new MergeJob { Status = JobStatus.Running, Message = "Démarrage" });
 
             _ = Task.Run(async () =>
             {
-                var result = await RunMergeAsync(request, step => job.Message = step);
+                var result = await RunMergeAsync(request, step => job.Message = step, job.Cancellation.Token);
                 job.Result = result;
                 job.FinishedAt = DateTime.UtcNow;
                 job.Status = result.Success ? JobStatus.Completed : JobStatus.Failed;
@@ -305,7 +315,15 @@ namespace EmbySubtitleMerger.Subtitles
             return job.Result;
         }
 
-        private static async Task<MergeSubtitlesResponse> RunMergeAsync(MergeSubtitlesRequest request, Action<string>? progress)
+        public object Post(CancelMergeRequest request)
+        {
+            return JobStore<MergeJob>.Cancel(request.JobId)
+                ? new MergeSubtitlesResponse { Success = true }
+                : Fail("Aucune fusion en cours à annuler.");
+        }
+
+        private static async Task<MergeSubtitlesResponse> RunMergeAsync(
+            MergeSubtitlesRequest request, Action<string>? progress, CancellationToken cancellationToken)
         {
             try
             {
@@ -319,7 +337,8 @@ namespace EmbySubtitleMerger.Subtitles
                 var (source1, source2) = await SubtitleSource.AcquirePairAsync(
                     request.VideoPath,
                     request.Primary1IsExternal, request.Primary1Path, request.PrimaryIndex,
-                    request.Primary2IsExternal, request.Primary2Path, request.SecondaryIndex);
+                    request.Primary2IsExternal, request.Primary2Path, request.SecondaryIndex,
+                    cancellationToken);
                 if (!source1.Success)
                     return Fail(source1.Error!);
                 if (!source2.Success)
@@ -353,6 +372,10 @@ namespace EmbySubtitleMerger.Subtitles
                     source1.Cleanup();
                     source2.Cleanup();
                 }
+            }
+            catch (OperationCanceledException)
+            {
+                return Fail("Fusion annulée.");
             }
             catch (Exception ex)
             {
