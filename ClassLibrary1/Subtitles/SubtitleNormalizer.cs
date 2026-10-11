@@ -25,16 +25,7 @@ namespace EmbySubtitleMerger.Subtitles
         /// <summary>Refaire les .srt qui existent déjà</summary>
         public bool Overwrite { get; set; }
 
-        /// <summary>Extraire aussi les pistes texte intégrées (SRT, MOV_TEXT, WEBVTT)</summary>
-        public bool ExtractText { get; set; }
-
-        /// <summary>Renommer les .srt externes existants pour leur ajouter la note</summary>
-        public bool Annotate { get; set; }
-
-        /// <summary>Écrire la note dans le titre des pistes SRT intégrées aux .mkv (modifie l'en-tête du .mkv)</summary>
-        public bool TagMkvTracks { get; set; }
-
-        /// <summary>Chemin de mkvpropedit, requis pour TagMkvTracks</summary>
+        /// <summary>Chemin de mkvpropedit, pour retirer la note du titre des pistes des .mkv (CleanupNote)</summary>
         public string? MkvPropEditPath { get; set; }
 
         /// <summary>
@@ -84,7 +75,6 @@ namespace EmbySubtitleMerger.Subtitles
     public class NormalizeAction
     {
         public const string Convert = "Convert";
-        public const string Extract = "Extract";
         public const string Rename = "Rename";
         public const string Tag = "Tag";
         public const string Delete = "Delete";
@@ -137,8 +127,6 @@ namespace EmbySubtitleMerger.Subtitles
         public int Deleted { get; private set; }
         public int Failures { get; private set; }
 
-        /// <summary>Pistes image (PGS, VOBSUB) rencontrées, impossibles à convertir en texte</summary>
-        public int ImageTracks { get; private set; }
 
         public int Changes => Created + Renamed + Tagged + Deleted + Merged;
 
@@ -150,7 +138,7 @@ namespace EmbySubtitleMerger.Subtitles
             lock (_actions)
             {
                 if (status == NormalizeAction.Failed) Failures++;
-                else if (kind == NormalizeAction.Convert || kind == NormalizeAction.Extract) Created++;
+                else if (kind == NormalizeAction.Convert) Created++;
                 else if (kind == NormalizeAction.Rename) Renamed++;
                 else if (kind == NormalizeAction.Tag) Tagged++;
                 else if (kind == NormalizeAction.Delete) Deleted++;
@@ -179,11 +167,6 @@ namespace EmbySubtitleMerger.Subtitles
             lock (_actions) Unmatched++;
         }
 
-        public void CountImageTrack()
-        {
-            lock (_actions) ImageTracks++;
-        }
-
         public List<NormalizeAction> SnapshotActions()
         {
             lock (_actions) return _actions.ToList();
@@ -194,7 +177,7 @@ namespace EmbySubtitleMerger.Subtitles
     /// Rend les sous-titres lisibles sur tous les appareils : les pistes ASS/SSA, que la plupart
     /// des TV et applis mobiles n'affichent pas, sont converties en .srt à côté des vidéos.
     /// Reprend les étapes du script emby_subs.py. L'image et le son des vidéos ne sont jamais réécrits ;
-    /// seules les options TagMkvTracks et CleanupNote modifient l'en-tête des .mkv (titre des pistes).
+    /// seule l'option CleanupNote modifie l'en-tête des .mkv (titre des pistes).
     /// </summary>
     public static class SubtitleNormalizer
     {
@@ -266,7 +249,7 @@ namespace EmbySubtitleMerger.Subtitles
                 else
                 {
                     var verb = options.DryRun ? "à créer" : "créé(s)";
-                    job.Message = $"{job.Created} .srt {verb}, {job.Renamed} renommage(s), {job.Tagged} piste(s) annotée(s), {job.Failures} échec(s).";
+                    job.Message = $"{job.Created} .srt {verb}, {job.Renamed} renommage(s), {job.Failures} échec(s).";
                 }
 
                 // Emby doit rescanner pour voir les nouveaux fichiers
@@ -569,21 +552,13 @@ namespace EmbySubtitleMerger.Subtitles
             NormalizeOptions options,
             CancellationToken cancellationToken)
         {
-            // Seul le .mkv peut contenir de l'ASS/SSA : les autres conteneurs ne sont lus
-            // que si l'on s'intéresse à leurs pistes texte
-            var tracks = NormalizeNaming.IsMkv(video) || options.ExtractText
+            // Seul le .mkv peut contenir de l'ASS/SSA : les autres conteneurs ne sont pas lus
+            var tracks = NormalizeNaming.IsMkv(video)
                 ? await ProbeAsync(job, video, cancellationToken)
                 : new List<SubtitleTrack>();
 
             // Vidéo illisible : on ne la prend pas pour une vidéo sans piste
             if (tracks == null) return;
-
-            // Noms que prendraient les conversions : un .srt d'origine ne doit jamais être renommé ainsi,
-            // il serait ensuite confondu avec une conversion
-            var conversionNames = new HashSet<string>(
-                files.Where(f => NormalizeNaming.IsStyledSubtitleFile(f) && owners.Of(f) == video)
-                    .Select(f => NormalizeNaming.PathWithNote(f, video, ".srt")),
-                StringComparer.Ordinal);
 
             // Langues qui ont déjà une piste texte dans la vidéo, lisible sur tous les appareils
             var languagesWithText = new HashSet<string>(tracks.Where(t => t.IsText).Select(t => LanguageKey(t.Language)));
@@ -598,8 +573,6 @@ namespace EmbySubtitleMerger.Subtitles
             {
                 ranks[track.Language] = ranks.TryGetValue(track.Language, out var seen) ? seen + 1 : 1;
 
-                conversionNames.Add(NormalizeNaming.ConvertedPath(video, track.Language, ranks[track.Language], track.TitleForFile, true));
-                conversionNames.Add(NormalizeNaming.ConvertedPath(video, track.Language, ranks[track.Language], track.TitleForFile, false));
 
                 if (!IsWanted(track.Language, options))
                 {
@@ -631,72 +604,7 @@ namespace EmbySubtitleMerger.Subtitles
                 conversions.Add(new PendingConversion(NormalizeAction.Convert, track.Index, target, $"piste {track.Codec.ToUpperInvariant()} {track.Language}"));
             }
 
-            if (options.ExtractText)
-            {
-                foreach (var track in tracks.Where(t => IsWanted(t.Language, options)))
-                {
-                    if (track.IsImage)
-                    {
-                        job.CountImageTrack();
-                        job.Add(NormalizeAction.Info, NormalizeAction.Planned, video, null,
-                            $"sous-titre {track.Number} ({track.Language}) : format image, impossible à convertir en texte");
-                        continue;
-                    }
-
-                    if (!track.IsText) continue;
-
-                    var target = NormalizeNaming.ExtractedPath(video, track.Language, track.Number, track.Title);
-                    conversions.Add(new PendingConversion(NormalizeAction.Extract, track.Index, target, $"piste texte {track.Language}"));
-                }
-            }
-
             await ConvertTracksAsync(job, video, conversions, options, cancellationToken);
-
-            if (options.Annotate)
-            {
-                foreach (var srt in files.Where(NormalizeNaming.IsSrt).ToList())
-                {
-                    if (NormalizeNaming.HasNote(srt)
-                        || owners.Of(srt) != video
-                        || NormalizeNaming.IsBilingual(srt, video))
-                    {
-                        continue;
-                    }
-
-                    var target = NormalizeNaming.PathWithNote(srt, video);
-                    if (conversionNames.Contains(target))
-                    {
-                        job.Add(NormalizeAction.Info, NormalizeAction.Planned, srt, null,
-                            "laissé tel quel (le nom annoté est celui de la conversion d'un sous-titre ASS/SSA)");
-                        continue;
-                    }
-
-                    if (File.Exists(target))
-                    {
-                        job.Add(NormalizeAction.Info, NormalizeAction.Planned, srt, null,
-                            $"laissé tel quel ({Path.GetFileName(target)} existe déjà)");
-                        continue;
-                    }
-
-                    RenameFile(job, srt, target, "ajout de la note", files, options);
-                }
-            }
-
-            if (options.TagMkvTracks && !string.IsNullOrEmpty(options.MkvPropEditPath))
-            {
-                var subripTracks = tracks.Where(t => t.Codec == "subrip").ToList();
-
-                if (!NormalizeNaming.IsMkv(video))
-                {
-                    if (subripTracks.Count > 0)
-                        job.Add(NormalizeAction.Info, NormalizeAction.Planned, video, null, "pistes intégrées non annotées (.mkv uniquement)");
-                }
-                else
-                {
-                    foreach (var track in subripTracks)
-                        await TagTrackAsync(job, video, track, options, cancellationToken);
-                }
-            }
         }
 
         /// <summary>
@@ -847,22 +755,6 @@ namespace EmbySubtitleMerger.Subtitles
             {
                 job.Add(NormalizeAction.Rename, NormalizeAction.Failed, source, name, ex.Message);
             }
-        }
-
-        /// <summary>
-        /// Écrit la note dans le titre d'une piste SRT intégrée à un .mkv. Seul l'en-tête du fichier change.
-        /// </summary>
-        private static async Task TagTrackAsync(
-            NormalizeJob job,
-            string video,
-            SubtitleTrack track,
-            NormalizeOptions options,
-            CancellationToken cancellationToken)
-        {
-            var title = NormalizeNaming.TrackTitleWithNote(track.Title);
-            if (title == null) return;   // déjà annotée
-
-            await SetTrackTitleAsync(job, video, track, title, options, cancellationToken);
         }
 
         /// <summary>

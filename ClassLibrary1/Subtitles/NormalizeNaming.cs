@@ -122,18 +122,6 @@ namespace EmbySubtitleMerger.Subtitles
         }
 
         /// <summary>
-        /// Fichier créé pour une piste texte intégrée : Film.Normalisé-pour-Emby(full)(s3).eng.srt
-        /// </summary>
-        public static string ExtractedPath(string videoPath, string language, int trackNumber, string? title)
-        {
-            // Note déjà écrite dans le titre de la piste du .mkv : on ne la répète pas
-            title = TrackTitleWithoutNote(title) ?? title ?? string.Empty;
-
-            var stem = Path.GetFileNameWithoutExtension(videoPath);
-            return Sibling(videoPath, $"{stem}.{FileNote(title)}(s{trackNumber}).{language}.srt");
-        }
-
-        /// <summary>
         /// La vidéo du même dossier à laquelle appartient un sous-titre : celle dont le nom
         /// ouvre le nom du sous-titre. Si plusieurs correspondent, le nom le plus long l'emporte.
         /// </summary>
@@ -207,7 +195,7 @@ namespace EmbySubtitleMerger.Subtitles
         }
 
         /// <summary>
-        /// Indique si un .srt est la copie d'une piste texte intégrée, créée par l'option d'extraction :
+        /// Indique si un .srt est la copie d'une piste texte intégrée, laissée par l'ancienne option d'extraction :
         /// Film.Normalisé-pour-Emby(titre)(s3).eng.srt. Cas particulier de IsFromEmbeddedTrack : la piste
         /// d'origine est lisible partout, la copie peut donc être retirée sans rien perdre.
         /// </summary>
@@ -238,16 +226,6 @@ namespace EmbySubtitleMerger.Subtitles
         {
             text = FontTagRegex.Replace(text, string.Empty);   // polices / couleurs
             return AssCodeRegex.Replace(text, string.Empty);   // codes ASS restants
-        }
-
-        /// <summary>
-        /// Titre d'une piste intégrée une fois annotée, ou null si elle porte déjà la note
-        /// </summary>
-        public static string? TrackTitleWithNote(string? title)
-        {
-            title ??= string.Empty;
-            if (title.StartsWith(Note, StringComparison.Ordinal)) return null;
-            return title.Length > 0 ? $"{Note} - {title}" : Note;
         }
 
         /// <summary>

@@ -61,15 +61,6 @@ namespace EmbySubtitleMerger.Subtitles
         /// <summary>Refaire les .srt qui existent déjà</summary>
         public bool Overwrite { get; set; }
 
-        /// <summary>Extraire aussi les pistes texte intégrées en fichiers .srt</summary>
-        public bool ExtractText { get; set; }
-
-        /// <summary>Ajouter la note au nom des .srt externes existants</summary>
-        public bool Annotate { get; set; }
-
-        /// <summary>Écrire la note dans le titre des pistes SRT intégrées aux .mkv (nécessite mkvpropedit)</summary>
-        public bool TagMkvTracks { get; set; }
-
         /// <summary>Nettoyer au lieu de normaliser : retire les .srt créés par la normalisation</summary>
         public bool Cleanup { get; set; }
 
@@ -145,7 +136,6 @@ namespace EmbySubtitleMerger.Subtitles
         public int Tagged { get; set; }
         public int Deleted { get; set; }
         public int Failures { get; set; }
-        public int ImageTracks { get; set; }
 
         /// <summary>Détail des opérations, fourni une fois la tâche terminée</summary>
         public List<NormalizeAction> Actions { get; set; } = new List<NormalizeAction>();
@@ -214,9 +204,6 @@ namespace EmbySubtitleMerger.Subtitles
                 {
                     DryRun = request.DryRun,
                     Overwrite = request.Overwrite,
-                    ExtractText = request.ExtractText,
-                    Annotate = request.Annotate,
-                    TagMkvTracks = request.TagMkvTracks && !request.Cleanup,
                     Cleanup = request.Cleanup,
                     CleanupConversions = request.CleanupConversions,
                     CleanupBilingual = request.CleanupBilingual,
@@ -236,7 +223,6 @@ namespace EmbySubtitleMerger.Subtitles
                     if (options.BatchLanguage1.Code == options.BatchLanguage2.Code)
                         return Fail("Choisissez deux langues différentes.");
 
-                    options.TagMkvTracks = false;
                     options.BatchMergeOptions = MergeOptions.From(request.MergeMode, request.ToleranceMs, null, null, request.Layout);
                 }
 
@@ -260,11 +246,8 @@ namespace EmbySubtitleMerger.Subtitles
                 }
 
                 // Sans mkvpropedit, le retrait de la note se limite aux noms de fichiers
-                if (options.TagMkvTracks || options.CleanupNote)
+                if (options.CleanupNote)
                     options.MkvPropEditPath = ExternalTools.FindMkvPropEdit();
-
-                if (options.TagMkvTracks && options.MkvPropEditPath == null)
-                    return Fail("mkvpropedit (MKVToolNix) n'est pas installé sur le serveur : les pistes des .mkv ne peuvent pas être annotées.");
 
                 // La tâche planifiée reprend les langues de la dernière normalisation complète
                 var plugin = Plugin.Instance;
@@ -325,7 +308,6 @@ namespace EmbySubtitleMerger.Subtitles
                 Tagged = job.Tagged,
                 Deleted = job.Deleted,
                 Failures = job.Failures,
-                ImageTracks = job.ImageTracks,
                 Actions = job.IsActive ? new List<NormalizeAction>() : job.SnapshotActions(),
                 ActionsTruncated = job.ActionsTruncated
             };

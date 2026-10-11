@@ -44,8 +44,6 @@ namespace EmbySubtitleMerger.Subtitles
         /// <summary>Tolérance en ms</summary>
         public int? ToleranceMs { get; set; }
 
-        /// <summary>Utiliser l'API cloud DoubleSub.io au lieu de la fusion locale</summary>
-        public bool UseCloudApi { get; set; } = false;
 
         /// <summary>Couleur du sous-titre primaire (ex: #FFFFFF)</summary>
         public string? Color1 { get; set; }
@@ -59,8 +57,6 @@ namespace EmbySubtitleMerger.Subtitles
         /// <summary>Decalage en ms pour le sous-titre 2</summary>
         public int Offset2Ms { get; set; } = 0;
 
-        /// <summary>Cle API DoubleSub.io (requise pour le mode cloud)</summary>
-        public string? DoubleSubApiKey { get; set; }
 
         /// <summary>Code langue du sous-titre 1 (ex: fre). Vide = détection sur le contenu</summary>
         public string? Language1 { get; set; }
@@ -135,59 +131,10 @@ namespace EmbySubtitleMerger.Subtitles
     }
     
     /// <summary>
-    /// Requête pour vérifier le statut de FFmpeg
-    /// </summary>
-    [Route("/EmbySubtitleMerger/Status", "GET")]
-    [Authenticated(Roles = "Admin")]
-    public class GetStatusRequest : IReturn<StatusResponse>
-    {
-    }
-    
-    /// <summary>
-    /// Réponse du statut
-    /// </summary>
-    public class StatusResponse
-    {
-        public bool FfmpegAvailable { get; set; }
-        public string? FfmpegVersion { get; set; }
-        public string? PluginVersion { get; set; }
-        public bool CloudApiAvailable { get; set; }
-        public string? CloudApiUrl { get; set; }
-    }
-    
-    /// <summary>
     /// Service API pour la fusion de sous-titres
     /// </summary>
     public class MergeService : IService
     {
-        /// <summary>
-        /// Vérifie le statut du plugin
-        /// </summary>
-        public async Task<object> Get(GetStatusRequest request)
-        {
-            var version = await ExternalTools.RunAsync(FfmpegHelper.FfmpegPath, new[] { "-version" }, 15);
-            var ffmpegAvailable = version.Success;
-            var ffmpegVersion = ffmpegAvailable ? version.Output.Split('\n')[0].Trim() : null;
-
-            // Vérifier l'API cloud
-            bool cloudApiAvailable = false;
-            try
-            {
-                using var apiClient = new DoubleSubApiClient();
-                cloudApiAvailable = await apiClient.IsAvailableAsync();
-            }
-            catch { }
-
-            return new StatusResponse
-            {
-                FfmpegAvailable = ffmpegAvailable,
-                FfmpegVersion = ffmpegVersion,
-                PluginVersion = typeof(Plugin).Assembly.GetName().Version?.ToString(3),
-                CloudApiAvailable = cloudApiAvailable,
-                CloudApiUrl = DoubleSubApiClient.DefaultApiUrl
-            };
-        }
-        
         /// <summary>
         /// Fusionne deux sous-titres
         /// </summary>
@@ -265,15 +212,6 @@ namespace EmbySubtitleMerger.Subtitles
                     if (SubtitleNaming.SamePath(outputPath, source1.Path) || SubtitleNaming.SamePath(outputPath, source2.Path))
                         return Fail("Le fichier produit écraserait l'un des deux sous-titres choisis. Choisissez deux autres pistes.");
 
-                    if (request.UseCloudApi)
-                    {
-                        if (string.IsNullOrEmpty(request.DoubleSubApiKey))
-                            return Fail("Cle API DoubleSub.io requise pour le mode cloud. Obtenez-en une sur doublesub.io/api/v1/docs");
-
-                        return RemoveReplacedDuals(
-                            await MergeViaCloudApiAsync(source1.Path, source2.Path, outputPath, request), request, language1, language2, source1, source2);
-                    }
-
                     return RemoveReplacedDuals(
                         MergeLocally(source1.Path, source2.Path, outputPath, request), request, language1, language2, source1, source2);
                 }
@@ -342,50 +280,7 @@ namespace EmbySubtitleMerger.Subtitles
         }
 
         /// <summary>
-        /// Fusionne via l'API DoubleSub.io (cloud).
-        /// Le service décide lui-même de la disposition : Layout et les décalages ne s'appliquent pas ici.
-        /// </summary>
-        private static async Task<MergeSubtitlesResponse> MergeViaCloudApiAsync(
-            string srt1Path,
-            string srt2Path,
-            string outputPath,
-            MergeSubtitlesRequest request)
-        {
-            try
-            {
-                using var apiClient = new DoubleSubApiClient(request.DoubleSubApiKey);
-
-                if (!await apiClient.IsAvailableAsync())
-                    return Fail("L'API DoubleSub.io n'est pas accessible. Vérifiez votre connexion internet ou utilisez la fusion locale.");
-
-                var result = await apiClient.MergeAsync(
-                    srt1Path,
-                    srt2Path,
-                    outputPath,
-                    request.Mode ?? "all",
-                    request.ToleranceMs ?? new MergeOptions().ToleranceMs,
-                    request.Color1,
-                    request.Color2);
-
-                if (!result.Success)
-                    return Fail($"Erreur API cloud: {result.Error}");
-
-                return new MergeSubtitlesResponse
-                {
-                    Success = true,
-                    Message = $"Fusion cloud réussie! {result.CueCount} sous-titres créés via DoubleSub.io",
-                    OutputPath = result.OutputPath,
-                    CueCount = result.CueCount
-                };
-            }
-            catch (Exception ex)
-            {
-                return Fail($"Erreur lors de l'appel API cloud: {ex.Message}");
-            }
-        }
-
-        /// <summary>
-        /// Fusionne localement (sans API)
+        /// Fusionne les deux SRT et écrit le bilingue
         /// </summary>
         private static MergeSubtitlesResponse MergeLocally(
             string srt1Path,

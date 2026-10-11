@@ -1,12 +1,12 @@
 # À faire
 
-État au 11/10/2026, version 9.14.0. Tout le code est commité sur la branche
+État au 11/10/2026, version 9.15.0. Tout le code est commité sur la branche
 `feature/traduction-nommage-disposition`. La dernière version installée sur le NAS est plus ancienne :
 presque rien de ce qui suit n'a encore tourné dans le vrai Emby.
 
 ## À vérifier sur le NAS (par l'utilisateur)
 
-- [ ] **Installer la 9.14.0** et vérifier que le plugin se charge. S'il ne se charge plus, les deux premiers
+- [ ] **Installer la 9.15.0** et vérifier que le plugin se charge. S'il ne se charge plus, les deux premiers
       suspects sont la tâche planifiée (`NormalizeScheduledTask`) et l'authentification des adresses
       (`[Authenticated(Roles = "Admin")]`), ajoutées sans pouvoir être essayées dans Emby.
 - [ ] **Fusion** sur un gros film (Les Deux Tours) : l'erreur « not valid JSON » doit avoir disparu.
@@ -62,3 +62,10 @@ presque rien de ce qui suit n'a encore tourné dans le vrai Emby.
 - [x] Fusion en série, panneau de la fiche d'un film, page en onglets, thème clair.
 - [x] Adresses du plugin réservées aux administrateurs ; plus de clé ni d'adresse écrite en dur.
 - [x] README à jour.
+
+## Outils retirés
+
+- 9.13.0 : renommage des anciens `Film.dual.srt` (migration terminée).
+- 9.15.0 : ajout de la note « Normalisé pour Emby » aux `.srt` et aux titres de pistes `.mkv`, extraction
+  des pistes texte intégrées en `.srt`, mode cloud DoubleSub.io. Le nettoyage sait toujours retirer les
+  fichiers et les notes que ces options avaient laissés.

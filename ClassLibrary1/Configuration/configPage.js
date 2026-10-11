@@ -1,14 +1,13 @@
 define([], function () {
     'use strict';
 
-    console.log('[SubMerger] Module loaded v9.14.1');
+    console.log('[SubMerger] Module loaded v9.15.0');
 
     var allMovies = [];      // Tous les medias charges
     var filteredMovies = []; // Medias filtres
     var libraries = [];      // Liste des mediatheques
     var currentMovie = null;
     var currentMediaSource = null; // Version selectionnee (MediaSource)
-    var useCloudApi = false;
     var currentTranslationJob = null;    // Id du job de traduction en cours
     var currentTranslationItemId = null; // Element Emby que ce job traduit
     var translationPollTimer = null;     // Timer de polling du statut
@@ -445,7 +444,6 @@ define([], function () {
 
         success(view, getItemLabel(currentMovie) + ' : ' + subs.length + ' sous-titre(s) trouvé(s). Choisissez une action dans les onglets ci-dessous.');
 
-        checkCloudStatus(view);
     }
 
     function refreshMovieMetadata(view) {
@@ -574,58 +572,6 @@ define([], function () {
     }
 
 
-    function checkCloudStatus(view) {
-        var cloudStatus = view.querySelector('#cloudStatus');
-
-        getPlugin('Status')
-            .then(function(data) {
-                console.log('[SubMerger] Status:', data);
-                if (data.CloudApiAvailable) {
-                    cloudStatus.textContent = 'DoubleSub.io disponible';
-                    cloudStatus.className = 'status-box status-ok';
-                } else {
-                    cloudStatus.textContent = 'DoubleSub.io non disponible - utilisez la fusion locale';
-                    cloudStatus.className = 'status-box status-warning';
-                }
-            })
-            .catch(function() {
-                cloudStatus.textContent = 'Impossible de vérifier DoubleSub.io';
-                cloudStatus.className = 'status-box status-error';
-            });
-    }
-
-    function selectMode(view, mode) {
-        var modeLocal = view.querySelector('#modeLocal');
-        var modeCloud = view.querySelector('#modeCloud');
-        var cloudStatus = view.querySelector('#cloudStatus');
-        var apiKeySection = view.querySelector('#apiKeySection');
-
-        if (mode === 'local') {
-            useCloudApi = false;
-            modeLocal.classList.add('active');
-            modeCloud.classList.remove('active');
-            cloudStatus.style.display = 'none';
-            apiKeySection.style.display = 'none';
-        } else {
-            useCloudApi = true;
-            modeLocal.classList.remove('active');
-            modeCloud.classList.add('active');
-            cloudStatus.style.display = 'block';
-            apiKeySection.style.display = 'block';
-            var savedKey = localStorage.getItem('doublesub_api_key');
-            if (savedKey) {
-                view.querySelector('#apiKey').value = savedKey;
-            }
-        }
-
-        // DoubleSub.io decide seul de la disposition et n'applique pas les decalages
-        ['#layout', '#offset1', '#offset2'].forEach(function (selector) {
-            view.querySelector(selector).disabled = useCloudApi;
-        });
-
-        console.log('[SubMerger] Mode selected: ' + (useCloudApi ? 'DoubleSub.io' : 'Local'));
-    }
-
     // Message affiche a cote du bouton concerne, dans la zone de resultat de l'onglet
     function showMessage(view, boxSelector, kind, message) {
         console.log('[SubMerger] ' + kind + ': ' + message);
@@ -738,21 +684,6 @@ define([], function () {
         var sel2 = sub2El.options[sub2El.selectedIndex];
 
 
-        var doublesubApiKey = '';
-        if (useCloudApi) {
-            doublesubApiKey = view.querySelector('#apiKey').value.trim();
-            if (!doublesubApiKey) {
-                showMessage(view, '#result', 'warning', 'Clé API DoubleSub.io requise pour le mode cloud (dans les options avancées).');
-                return;
-            }
-            if (!doublesubApiKey.startsWith('dsub_')) {
-                showMessage(view, '#result', 'warning', 'Clé API DoubleSub.io invalide (elle doit commencer par dsub_).');
-                return;
-            }
-            localStorage.setItem('doublesub_api_key', doublesubApiKey);
-        }
-
-
         mergeItemId = currentMovie.Id;
         mergeStep = '';
         mergeStarted = Date.now();
@@ -777,8 +708,6 @@ define([], function () {
             Offset2Ms: parseInt(view.querySelector('#offset2').value) || 0,
             Layout: view.querySelector('#layout').value,
             MarkDefault: view.querySelector('#mergeDefault').checked,
-            UseCloudApi: useCloudApi,
-            DoubleSubApiKey: doublesubApiKey,
             Background: true
         })
         .then(function (data) {
@@ -1059,7 +988,6 @@ define([], function () {
     // de lui-meme une fois le programme installe : la verification est refaite a chaque affichage.
     function checkNormalizeTools(view) {
         var box = view.querySelector('#normalizeTools');
-        var tagMkv = view.querySelector('#normalizeTagMkv');
 
         getPlugin('Tools')
             .then(function (data) {
@@ -1070,12 +998,10 @@ define([], function () {
                     messages.push('<strong>ffmpeg ou ffprobe est introuvable sur le serveur.</strong> La normalisation ne peut pas fonctionner sans eux.');
                 }
                 if (!data.MkvPropEditAvailable) {
-                    messages.push('<strong>MKVToolNix n\'est pas installé sur le serveur.</strong> Tout fonctionne sauf la modification du titre des pistes intégrées aux .mkv (ajout ou retrait de la note). '
+                    messages.push('<strong>MKVToolNix n\'est pas installé sur le serveur.</strong> Tout fonctionne sauf le retrait de la note "Normalisé pour Emby" du titre des pistes intégrées aux .mkv. '
                         + 'Sur un Synology : Centre de paquets, source <em>https://packages.synocommunity.com</em>, paquet MKVToolNix. Ce message disparaîtra une fois le paquet installé.');
                 }
 
-                tagMkv.disabled = !data.MkvPropEditAvailable;
-                if (!data.MkvPropEditAvailable) tagMkv.checked = false;
                 normalizeBlocked = blocking;
                 refreshNormalizeButtons(view);
 
@@ -1183,10 +1109,7 @@ define([], function () {
                     CleanupNote: normalizeUi(view, 'note').checked,
                     VideoPath: wholeLibrary ? '' : currentVideoPath(),
                     Languages: view.querySelector('#normalizeLanguages').value,
-                    Overwrite: view.querySelector('#normalizeOverwrite').checked,
-                    ExtractText: view.querySelector('#normalizeExtract').checked,
-                    Annotate: view.querySelector('#normalizeAnnotate').checked,
-                    TagMkvTracks: view.querySelector('#normalizeTagMkv').checked
+                    Overwrite: view.querySelector('#normalizeOverwrite').checked
                 };
             }
             preview = { body: body, itemId: wholeLibrary ? null : currentMovie.Id, target: normalizeTarget };
@@ -1322,15 +1245,12 @@ define([], function () {
                 if (changes > 0) summary += ' Analyse de la médiathèque demandée.';
             }
         } else if (changes === 0 && data.Failures === 0) {
-            summary = 'Rien à faire : aucun sous-titre à convertir, renommer ou annoter (' + data.Total + ' fichier(s) examinés).';
+            summary = 'Rien à faire : aucun sous-titre à convertir (' + data.Total + ' fichier(s) examinés).';
         } else if (data.DryRun) {
-            summary = 'Aperçu : ' + data.Created + ' .srt à créer, ' + data.Renamed + ' fichier(s) à renommer, ' + data.Tagged + ' piste(s) à annoter.';
+            summary = 'Aperçu : ' + data.Created + ' .srt à créer' + (data.Renamed > 0 ? ', ' + data.Renamed + ' fichier(s) à renommer' : '') + '.';
         } else {
-            summary = data.Created + ' .srt créé(s), ' + data.Renamed + ' fichier(s) renommé(s), ' + data.Tagged + ' piste(s) annotée(s), ' + data.Failures + ' échec(s).';
+            summary = data.Created + ' .srt créé(s), ' + (data.Renamed > 0 ? data.Renamed + ' fichier(s) renommé(s), ' : '') + data.Failures + ' échec(s).';
             if (changes > 0) summary += ' Analyse de la médiathèque demandée.';
-        }
-        if (data.ImageTracks > 0) {
-            summary += ' ' + data.ImageTracks + ' sous-titre(s) image (PGS/VOBSUB) non convertis.';
         }
 
         var rows = data.Actions.map(function (action) {
@@ -1408,8 +1328,6 @@ define([], function () {
 
         on('#btnRefresh', 'click', function () { refreshMovieMetadata(view); });
         on('#btnMerge', 'click', function () { doMerge(view); });
-        on('#modeLocal', 'click', function () { selectMode(view, 'local'); });
-        on('#modeCloud', 'click', function () { selectMode(view, 'cloud'); });
 
         on('#btnTranslate', 'click', function () { doTranslate(view); });
         on('#btnCancelTranslate', 'click', function () { cancelTranslation(view); });
@@ -1436,7 +1354,7 @@ define([], function () {
         on('#btnMergeCancel', 'click', function () { cancelMerge(); });
         on('#translateEngine', 'change', function () { showTranslateEngine(view); });
 
-        ['#normalizeScope', '#normalizeLanguages', '#normalizeAnnotate', '#normalizeTagMkv', '#normalizeExtract', '#normalizeOverwrite',
+        ['#normalizeScope', '#normalizeLanguages', '#normalizeOverwrite',
             '#cleanupConversions', '#cleanupBilingual', '#cleanupNote',
             '#libCleanupConversions', '#libCleanupBilingual', '#libCleanupNote',
             '#batchLang1', '#batchLang2', '#batchScope', '#layout', '#mergeMode', '#mergeDefault',
@@ -1459,7 +1377,7 @@ define([], function () {
     }
 
     return function (view) {
-        console.log('[SubMerger] Controller init v9.14.1');
+        console.log('[SubMerger] Controller init v9.15.0');
 
         var bound = false;
 

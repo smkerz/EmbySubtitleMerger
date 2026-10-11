@@ -20,7 +20,6 @@ also translate a track, convert ASS/SSA subtitles to SRT, and tidy up the files 
   It can optionally be marked `default` so Emby selects it automatically.
 - Runs as a background job with progress and a cancel button: extracting tracks from a large file takes minutes.
 - Also available from the subtitle editor dialog of a movie.
-- Optional cloud merge through the DoubleSub.io API.
 
 ### Translate (tab "Traduire")
 - Translate a whole subtitle track and optionally build the bilingual file in one go.
@@ -72,7 +71,7 @@ The new subtitle is written next to the video file and Emby is asked to refresh 
 
 - Emby Server 4.7+ (.NET 6.0 compatible). The plugin's endpoints require an administrator session.
 - **ffmpeg / ffprobe**: the ones shipped with Emby are used automatically.
-- **MKVToolNix** (`mkvpropedit`), optional: only needed to add or remove the note in the track titles of `.mkv` files.
+- **MKVToolNix** (`mkvpropedit`), optional: only needed to remove the "Normalisé pour Emby" note from the track titles of `.mkv` files.
 
 ## Project Structure
 
@@ -102,8 +101,7 @@ EmbySubtitleMerger/
 │       ├── SettingsService.cs         # Translation settings stored on the server
 │       ├── Jobs.cs                    # Background jobs
 │       ├── ExternalTools.cs           # ffmpeg, ffprobe, mkvpropedit
-│       ├── SrtParser.cs               # SRT reader / writer
-│       └── DoubleSubApiClient.cs      # DoubleSub.io API client
+│       └── SrtParser.cs               # SRT reader / writer
 ├── TODO.md
 └── README.md
 ```
