@@ -87,6 +87,9 @@ namespace EmbySubtitleMerger
         /// <summary>Langue cible utilisée quand la requête n'en précise pas</summary>
         public string DefaultTargetLanguage { get; set; } = "fr";
 
+        /// <summary>Moteur de traduction utilisé quand la requête n'en précise pas : "google" ou "claude"</summary>
+        public string TranslationEngine { get; set; } = Subtitles.TranslationEngines.Google;
+
         /// <summary>Modèle Claude utilisé pour la traduction</summary>
         public string TranslationModel { get; set; } = Subtitles.ClaudeTranslationClient.DefaultModel;
 

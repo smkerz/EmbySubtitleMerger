@@ -57,6 +57,25 @@ namespace EmbySubtitleMerger.Subtitles
         /// (avec mkvpropedit) et du nom des .srt d'origine qui avaient été renommés.
         /// </summary>
         public bool CleanupNote { get; set; }
+
+        /// <summary>
+        /// Mode fusion en série : au lieu de normaliser, crée le bilingue BatchLanguage1 + BatchLanguage2
+        /// de chaque vidéo qui a les deux langues et pas encore ce bilingue.
+        /// </summary>
+        public bool BatchMerge { get; set; }
+
+        public LanguageInfo? BatchLanguage1 { get; set; }
+        public LanguageInfo? BatchLanguage2 { get; set; }
+        public MergeOptions BatchMergeOptions { get; set; } = new MergeOptions();
+
+        /// <summary>En fusion en série, marquer les bilingues "default"</summary>
+        public bool MarkDefault { get; set; }
+
+        /// <summary>Avec VideoPath : traiter toutes les vidéos de son dossier (une saison), pas elle seule</summary>
+        public bool WholeFolder { get; set; }
+
+        /// <summary>Les modes qui ne parcourent que les vidéos, sans convertir les .ass/.ssa posés à côté</summary>
+        public bool VideosOnly => Cleanup || BatchMerge;
     }
 
     /// <summary>
@@ -69,6 +88,7 @@ namespace EmbySubtitleMerger.Subtitles
         public const string Rename = "Rename";
         public const string Tag = "Tag";
         public const string Delete = "Delete";
+        public const string Merge = "Merge";
         public const string Info = "Info";
 
         public const string Planned = "Planned";
@@ -102,6 +122,15 @@ namespace EmbySubtitleMerger.Subtitles
         /// <summary>true pour un nettoyage, false pour une normalisation</summary>
         public bool Cleanup { get; set; }
 
+        /// <summary>true pour une fusion en série</summary>
+        public bool BatchMerge { get; set; }
+
+        /// <summary>Bilingues créés par une fusion en série</summary>
+        public int Merged { get; private set; }
+
+        /// <summary>Vidéos écartées d'une fusion en série, faute d'avoir les deux langues</summary>
+        public int Unmatched { get; private set; }
+
         public int Created { get; private set; }
         public int Renamed { get; private set; }
         public int Tagged { get; private set; }
@@ -111,7 +140,7 @@ namespace EmbySubtitleMerger.Subtitles
         /// <summary>Pistes image (PGS, VOBSUB) rencontrées, impossibles à convertir en texte</summary>
         public int ImageTracks { get; private set; }
 
-        public int Changes => Created + Renamed + Tagged + Deleted;
+        public int Changes => Created + Renamed + Tagged + Deleted + Merged;
 
         /// <summary>true si des opérations n'ont pas été listées (voir MaxListedActions)</summary>
         public bool ActionsTruncated { get; private set; }
@@ -125,6 +154,7 @@ namespace EmbySubtitleMerger.Subtitles
                 else if (kind == NormalizeAction.Rename) Renamed++;
                 else if (kind == NormalizeAction.Tag) Tagged++;
                 else if (kind == NormalizeAction.Delete) Deleted++;
+                else if (kind == NormalizeAction.Merge) Merged++;
 
                 if (_actions.Count >= MaxListedActions)
                 {
@@ -142,6 +172,11 @@ namespace EmbySubtitleMerger.Subtitles
                     });
                 }
             }
+        }
+
+        public void CountUnmatched()
+        {
+            lock (_actions) Unmatched++;
         }
 
         public void CountImageTrack()
@@ -208,9 +243,9 @@ namespace EmbySubtitleMerger.Subtitles
 
                 var directories = ListDirectories(folders, options);
 
-                // Le nettoyage ne parcourt que les vidéos ; la normalisation traite aussi les .ass/.ssa
+                // Seule la normalisation traite aussi les .ass/.ssa posés à côté des vidéos
                 job.Total = directories.Sum(d => d.Count(f =>
-                    InScope(f, d, options) && (!options.Cleanup || NormalizeNaming.IsVideo(f))));
+                    InScope(f, d, options) && (!options.VideosOnly || NormalizeNaming.IsVideo(f))));
 
                 foreach (var files in directories)
                 {
@@ -218,7 +253,12 @@ namespace EmbySubtitleMerger.Subtitles
                     await ProcessDirectoryAsync(job, files, options, cancellationToken);
                 }
 
-                if (options.Cleanup)
+                if (options.BatchMerge)
+                {
+                    job.Message = $"{job.Merged} bilingue(s) {(options.DryRun ? "à créer" : "créé(s)")}, "
+                        + $"{job.Unmatched} vidéo(s) sans les deux langues, {job.Failures} échec(s).";
+                }
+                else if (options.Cleanup)
                 {
                     job.Message = $"{job.Deleted} fichier(s) {(options.DryRun ? "à supprimer" : "supprimé(s)")}, "
                         + $"{job.Renamed + job.Tagged} note(s) {(options.DryRun ? "à retirer" : "retirée(s)")}, {job.Failures} échec(s).";
@@ -241,13 +281,13 @@ namespace EmbySubtitleMerger.Subtitles
             catch (OperationCanceledException)
             {
                 job.Status = JobStatus.Cancelled;
-                job.Message = options.Cleanup ? "Nettoyage annulé." : "Normalisation annulée.";
+                job.Message = options.BatchMerge ? "Fusion en série annulée." : options.Cleanup ? "Nettoyage annulé." : "Normalisation annulée.";
             }
             catch (Exception ex)
             {
                 job.Status = JobStatus.Failed;
                 job.Error = ex.Message;
-                job.Message = options.Cleanup ? "Échec du nettoyage." : "Échec de la normalisation.";
+                job.Message = options.BatchMerge ? "Échec de la fusion en série." : options.Cleanup ? "Échec du nettoyage." : "Échec de la normalisation.";
                 Plugin.Log($"[Normalize] ERREUR: {ex}");
             }
             finally
@@ -292,7 +332,7 @@ namespace EmbySubtitleMerger.Subtitles
         {
             var isVideo = NormalizeNaming.IsVideo(file);
             if (!isVideo && !NormalizeNaming.IsStyledSubtitleFile(file)) return false;
-            if (options.VideoPath == null) return true;
+            if (options.VideoPath == null || options.WholeFolder) return true;
 
             var owner = isVideo ? file : NormalizeNaming.FindVideoFor(file, directoryFiles.Where(NormalizeNaming.IsVideo));
             return owner != null && SubtitleNaming.SamePath(owner, options.VideoPath);
@@ -314,7 +354,16 @@ namespace EmbySubtitleMerger.Subtitles
 
                 try
                 {
-                    if (options.Cleanup)
+                    if (options.BatchMerge)
+                    {
+                        var current = video;
+                        await BatchMerger.MergeVideoAsync(
+                            job, current,
+                            files.Where(f => NormalizeNaming.IsSrt(f) && owners.Of(f) == current).ToList(),
+                            () => ProbeAsync(job, current, cancellationToken),
+                            options, cancellationToken);
+                    }
+                    else if (options.Cleanup)
                     {
                         await CleanupVideoAsync(job, video, files, owners, options, cancellationToken);
                     }
@@ -338,7 +387,7 @@ namespace EmbySubtitleMerger.Subtitles
                 job.Processed++;
             }
 
-            if (options.Cleanup) return;
+            if (options.VideosOnly) return;
 
             foreach (var subtitle in files.Where(NormalizeNaming.IsStyledSubtitleFile).Where(f => InScope(f, files, options)).ToList())
             {
@@ -539,6 +588,9 @@ namespace EmbySubtitleMerger.Subtitles
             // Langues qui ont déjà une piste texte dans la vidéo, lisible sur tous les appareils
             var languagesWithText = new HashSet<string>(tracks.Where(t => t.IsText).Select(t => LanguageKey(t.Language)));
 
+            // Pistes à sortir de la vidéo : elles le seront toutes ensemble, en une seule lecture
+            var conversions = new List<PendingConversion>();
+
             // Pistes ASS/SSA intégrées : converties dans les langues choisies, sauf si la langue a déjà une piste texte
             var ranks = new Dictionary<string, int>();
             var defaultGiven = new HashSet<string>();
@@ -576,8 +628,7 @@ namespace EmbySubtitleMerger.Subtitles
                     continue;
                 }
 
-                await ConvertAsync(job, NormalizeAction.Convert, video, track.Index, target,
-                    $"piste {track.Codec.ToUpperInvariant()} {track.Language}", options, cancellationToken);
+                conversions.Add(new PendingConversion(NormalizeAction.Convert, track.Index, target, $"piste {track.Codec.ToUpperInvariant()} {track.Language}"));
             }
 
             if (options.ExtractText)
@@ -595,10 +646,11 @@ namespace EmbySubtitleMerger.Subtitles
                     if (!track.IsText) continue;
 
                     var target = NormalizeNaming.ExtractedPath(video, track.Language, track.Number, track.Title);
-                    await ConvertAsync(job, NormalizeAction.Extract, video, track.Index, target,
-                        $"piste texte {track.Language}", options, cancellationToken);
+                    conversions.Add(new PendingConversion(NormalizeAction.Extract, track.Index, target, $"piste texte {track.Language}"));
                 }
             }
+
+            await ConvertTracksAsync(job, video, conversions, options, cancellationToken);
 
             if (options.Annotate)
             {
@@ -664,7 +716,7 @@ namespace EmbySubtitleMerger.Subtitles
         }
 
         /// <summary>Pistes de sous-titres de la vidéo, ou null si elle n'a pas pu être lue</summary>
-        private static async Task<List<SubtitleTrack>?> ProbeAsync(NormalizeJob job, string video, CancellationToken cancellationToken)
+        internal static async Task<List<SubtitleTrack>?> ProbeAsync(NormalizeJob job, string video, CancellationToken cancellationToken)
         {
             var result = await ExternalTools.RunAsync(FfmpegHelper.FfprobePath, new[]
             {
@@ -688,6 +740,55 @@ namespace EmbySubtitleMerger.Subtitles
                 job.Add(NormalizeAction.Info, NormalizeAction.Failed, video, null, $"lecture impossible : {ex.Message}");
                 return null;
             }
+        }
+
+        /// <summary>Une piste d'une vidéo à convertir en .srt</summary>
+        private sealed class PendingConversion
+        {
+            public PendingConversion(string kind, int streamIndex, string output, string detail)
+            {
+                Kind = kind;
+                StreamIndex = streamIndex;
+                Output = output;
+                Detail = detail;
+            }
+
+            public string Kind { get; }
+            public int StreamIndex { get; }
+            public string Output { get; }
+            public string Detail { get; }
+        }
+
+        /// <summary>
+        /// Convertit plusieurs pistes d'une vidéo en un seul passage de ffmpeg : la vidéo n'est lue
+        /// qu'une fois, quel que soit le nombre de pistes. Si le passage groupé échoue (une piste
+        /// illisible suffit), on recommence piste par piste pour sauver les autres et nommer la fautive.
+        /// </summary>
+        private static async Task ConvertTracksAsync(
+            NormalizeJob job,
+            string video,
+            List<PendingConversion> conversions,
+            NormalizeOptions options,
+            CancellationToken cancellationToken)
+        {
+            // Mêmes règles que pour une piste seule : un .srt déjà présent n'est pas refait, l'aperçu n'écrit rien
+            var todo = conversions.Where(c => options.Overwrite || !File.Exists(c.Output)).ToList();
+
+            if (!options.DryRun && todo.Count > 1)
+            {
+                var grouped = await ExternalTools.ConvertToSrtAsync(
+                    video, todo.Select(c => ((int?)c.StreamIndex, c.Output)).ToList(), cancellationToken);
+
+                if (grouped.Success)
+                {
+                    foreach (var done in todo)
+                        job.Add(done.Kind, NormalizeAction.Done, video, Path.GetFileName(done.Output), done.Detail);
+                    return;
+                }
+            }
+
+            foreach (var conversion in todo)
+                await ConvertAsync(job, conversion.Kind, video, conversion.StreamIndex, conversion.Output, conversion.Detail, options, cancellationToken);
         }
 
         /// <summary>

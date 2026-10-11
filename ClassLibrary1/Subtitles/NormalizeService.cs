@@ -81,6 +81,29 @@ namespace EmbySubtitleMerger.Subtitles
 
         /// <summary>En nettoyage, retirer aussi la note "Normalisé pour Emby" des titres de pistes des .mkv et des .srt d'origine renommés</summary>
         public bool CleanupNote { get; set; }
+
+        /// <summary>
+        /// Fusion en série au lieu de normaliser : crée le bilingue Language1 + Language2 des vidéos
+        /// qui ont les deux langues. Avec VideoPath, porte sur tout le dossier de cette vidéo.
+        /// </summary>
+        public bool BatchMerge { get; set; }
+
+        /// <summary>Fusion en série : langue du haut (ex: en)</summary>
+        public string? Language1 { get; set; }
+
+        /// <summary>Fusion en série : langue du bas (ex: ru)</summary>
+        public string? Language2 { get; set; }
+
+        /// <summary>Fusion en série : all, overlapping ou primary</summary>
+        public string? MergeMode { get; set; }
+
+        public int? ToleranceMs { get; set; }
+
+        /// <summary>Fusion en série : topbottom (défaut) ou stacked</summary>
+        public string? Layout { get; set; }
+
+        /// <summary>Fusion en série : marquer les bilingues "default"</summary>
+        public bool MarkDefault { get; set; }
     }
 
     public class NormalizeResponse
@@ -108,6 +131,9 @@ namespace EmbySubtitleMerger.Subtitles
         public string? Status { get; set; }
         public bool DryRun { get; set; }
         public bool Cleanup { get; set; }
+        public bool BatchMerge { get; set; }
+        public int Merged { get; set; }
+        public int Unmatched { get; set; }
         public int Processed { get; set; }
         public int Total { get; set; }
         public int PercentComplete { get; set; }
@@ -174,6 +200,9 @@ namespace EmbySubtitleMerger.Subtitles
                 if (running != null)
                     return new NormalizeResponse { Success = true, JobId = running.Id, AlreadyRunning = true };
 
+                if (request.Cleanup && request.BatchMerge)
+                    return Fail("Nettoyage et fusion en série ne se demandent pas ensemble.");
+
                 // Le nettoyage ne convertit rien : il lit seulement les vidéos avec ffprobe
                 if (!await ExternalTools.RespondsAsync(FfmpegHelper.FfprobePath)
                     || (!request.Cleanup && !await ExternalTools.RespondsAsync(FfmpegHelper.FfmpegPath)))
@@ -191,12 +220,29 @@ namespace EmbySubtitleMerger.Subtitles
                     Cleanup = request.Cleanup,
                     CleanupConversions = request.CleanupConversions,
                     CleanupBilingual = request.CleanupBilingual,
-                    CleanupNote = request.Cleanup && request.CleanupNote
+                    CleanupNote = request.Cleanup && request.CleanupNote,
+                    BatchMerge = request.BatchMerge,
+                    MarkDefault = request.MarkDefault,
+                    WholeFolder = request.BatchMerge
                 };
+
+                if (options.BatchMerge)
+                {
+                    options.BatchLanguage1 = SubtitleNaming.Resolve(request.Language1);
+                    options.BatchLanguage2 = SubtitleNaming.Resolve(request.Language2);
+
+                    if (options.BatchLanguage1 == null || options.BatchLanguage2 == null)
+                        return Fail("Choisissez les deux langues à fusionner.");
+                    if (options.BatchLanguage1.Code == options.BatchLanguage2.Code)
+                        return Fail("Choisissez deux langues différentes.");
+
+                    options.TagMkvTracks = false;
+                    options.BatchMergeOptions = MergeOptions.From(request.MergeMode, request.ToleranceMs, null, null, request.Layout);
+                }
 
                 // Les langues ne servent qu'à la normalisation
                 var languageList = string.IsNullOrWhiteSpace(request.Languages) ? DefaultLanguages : request.Languages!;
-                foreach (var code in options.Cleanup
+                foreach (var code in options.VideosOnly
                     ? Array.Empty<string>()
                     : languageList.Split(new[] { ',', ';', ' ' }, StringSplitOptions.RemoveEmptyEntries))
                 {
@@ -223,7 +269,7 @@ namespace EmbySubtitleMerger.Subtitles
                 // La tâche planifiée reprend les langues de la dernière normalisation complète
                 var plugin = Plugin.Instance;
                 var chosen = string.Join(",", options.Languages);
-                if (plugin != null && !options.Cleanup && !options.DryRun && options.VideoPath == null
+                if (plugin != null && !options.VideosOnly && !options.DryRun && options.VideoPath == null
                     && plugin.Configuration.NormalizeLanguages != chosen)
                 {
                     plugin.Configuration.NormalizeLanguages = chosen;
@@ -231,9 +277,9 @@ namespace EmbySubtitleMerger.Subtitles
                 }
 
                 var folders = options.VideoPath == null ? LibraryFolders.All(_libraryManager) : new List<string>();
-                var job = JobStore<NormalizeJob>.Add(new NormalizeJob { DryRun = options.DryRun, Cleanup = options.Cleanup });
+                var job = JobStore<NormalizeJob>.Add(new NormalizeJob { DryRun = options.DryRun, Cleanup = options.Cleanup, BatchMerge = options.BatchMerge });
 
-                Plugin.Log($"[Normalize] Job {job.Id}: {(options.Cleanup ? "nettoyage" : "normalisation")} ({(options.DryRun ? "aperçu" : "exécution")}), "
+                Plugin.Log($"[Normalize] Job {job.Id}: {(options.BatchMerge ? "fusion en série" : options.Cleanup ? "nettoyage" : "normalisation")} ({(options.DryRun ? "aperçu" : "exécution")}), "
                     + $"{(options.VideoPath == null ? folders.Count + " dossier(s)" : Path.GetFileName(options.VideoPath))}, "
                     + $"langues {string.Join(",", options.Languages)}");
 
@@ -266,6 +312,9 @@ namespace EmbySubtitleMerger.Subtitles
                 Status = job.Status.ToString(),
                 DryRun = job.DryRun,
                 Cleanup = job.Cleanup,
+                BatchMerge = job.BatchMerge,
+                Merged = job.Merged,
+                Unmatched = job.Unmatched,
                 Processed = job.Processed,
                 Total = job.Total,
                 PercentComplete = job.PercentComplete,

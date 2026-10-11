@@ -1,68 +1,64 @@
 # À faire
 
-## En cours
+État au 11/10/2026, version 9.12.0. Tout le code est commité sur la branche
+`feature/traduction-nommage-disposition`. La dernière version installée sur le NAS est plus ancienne :
+presque rien de ce qui suit n'a encore tourné dans le vrai Emby.
 
-- [x] **Renommage des anciens `.dual.srt`** : les 5 fichiers que l'outil ignorait ont été retirés du NAS
-      le 11/10/2026 (Manhunter, Mission impossible 2, Les Deux Tours, King of New York,
-      Sex and the City S01E10).
-- [ ] **Refaire ces 5 fusions** avec la 9.1.0 si un bilingue est toujours voulu. Pour Les Deux Tours,
-      l'ancien fichier n'affichait que le russe : vérifier que la seconde piste est bien un sous-titre
-      texte avant de fusionner.
-- [x] **9.1.0 installée** sur le NAS le 11/10/2026 (détection russe / ukrainien corrigée, normalisation).
-- [ ] **TV Samsung** : vérifier la disposition haut/bas (deux répliques simultanées) sur une fusion refaite.
-      Si une seule langue s'affiche, utiliser « Tout en bas ».
-- [ ] **Traduction** : premier essai réel sur un épisode court (aucun appel à l'API n'a encore été fait).
+## À vérifier sur le NAS (par l'utilisateur)
 
-## Retrait des bilingues défaillants depuis le plugin
+- [ ] **Installer la 9.12.0** et vérifier que le plugin se charge. S'il ne se charge plus, les deux premiers
+      suspects sont la tâche planifiée (`NormalizeScheduledTask`) et l'authentification des adresses
+      (`[Authenticated(Roles = "Admin")]`), ajoutées sans pouvoir être essayées dans Emby.
+- [ ] **Fusion** sur un gros film (Les Deux Tours) : l'erreur « not valid JSON » doit avoir disparu.
+- [ ] **TV Samsung** : disposition haut/bas sur une fusion refaite. Si une seule langue s'affiche,
+      utiliser « Les deux en bas ».
+- [ ] **Traduction** : un épisode court avec Google Traduction ; Claude n'a jamais fait d'appel réel.
+- [ ] **Nettoyage** : aperçu puis exécution sur un seul film, dont le retrait de la note dans les titres
+      de pistes `.mkv` (`mkvpropedit` jamais exécuté).
+- [ ] **Panneau de fusion de la fiche d'un film** : vérifier qu'il s'affiche dans la fenêtre des sous-titres.
+- [ ] **Tâche planifiée** : lui ajouter un déclencheur dans Emby et vérifier une exécution.
+- [ ] **Fusion en série** : aperçu sur une saison.
+- [ ] **Bilingue « par défaut »** : vérifier comment Emby le choisit face à une piste intégrée par défaut.
+- [ ] Refaire les fusions des 5 films dont l'ancien bilingue a été retiré (Manhunter, Mission impossible 2,
+      Les Deux Tours, King of New York, Sex and the City S01E10).
 
-Remplace le script lancé à la main dans le Planificateur de tâches du NAS.
+## Reste à faire
 
-- [ ] Dans l'aperçu du renommage, une case à cocher sur chaque fichier ignoré.
-- [ ] Bouton « Retirer les fichiers cochés » : déplacement dans un dossier `_anciens_dual` de la
-      médiathèque (pas de suppression définitive), puis analyse de la médiathèque.
-- [ ] Le serveur ne déplace que des fichiers `.dual.srt` situés dans un dossier de médiathèque.
+- [ ] **Clé API Emby à révoquer** : une clé du serveur Emby du PC a été publiée dans l'historique git
+      (`MergeService.cs`, `SubtitleMerger.html`). Les fichiers sont corrigés ou retirés, mais l'historique
+      la contient toujours : la supprimer dans Emby (Tableau de bord, Clés API).
+- [ ] Fusionner la branche dans `main` une fois la version validée sur le NAS.
+- [ ] Accents dans les textes de la page (tout est écrit sans accents par précaution d'encodage).
+- [ ] Renommage des anciens `.dual.srt` en tâche de fond, seulement si l'aperçu s'avère trop lent sur le NAS.
+- [ ] Captures d'écran du README à refaire (elles montrent l'ancienne page).
+- [ ] Moteur de traduction gratuit de meilleure qualité (Gemini, palier gratuit avec clé) si Google
+      Traduction ne suffit pas.
+- [ ] Les trois boucles de suivi de la page (fusion, traduction, normalisation) et leurs trois formats de
+      statut pourraient être unifiés ; à faire quand le tout aura été validé dans Emby.
 
-## Normalisation des sous-titres (reprise de `emby_subs.py`, version 9.1.0)
+## Décisions prises
 
-Carte « Normaliser les sous-titres » dans la page du plugin : conversion des pistes ASS/SSA en SRT
-sur le NAS, sans PC ni Python.
+- **Modes de fusion** : assumés. Les deux dispositions gardent les mêmes répliques ; seul le minutage
+  diffère (une réplique commune en « tout en bas », chaque langue son minutage en haut/bas).
+  Les libellés de la page le disent.
+- **Traduction** : reprise après interruption (les répliques déjà traduites sont gardées 7 jours) ;
+  un `Film.xx.srt` existant n'est remplacé que si la case est cochée.
+- **Refusion** : l'ancien `Film.dual.srt` et l'autre forme du même bilingue sont retirés quand le nouveau est créé.
+- **Réglages de traduction** (moteur, langue cible, clé Anthropic) : enregistrés sur le serveur ; la clé
+  n'est jamais renvoyée au navigateur.
+- **Fusion rapide et userscript** : retirés. Ils ne fonctionnaient qu'avec la clé écrite en dur du PC ;
+  le panneau de la fiche d'un film les remplace.
+- **Note « Normalisé pour Emby »** : plus ajoutée par défaut, retirable par le nettoyage. Elle reste dans le
+  nom des fichiers générés, où elle sert à les reconnaître sans risque pour les fichiers d'origine.
 
-- [x] Par film ou pour toutes les médiathèques, avec « Aperçu » puis « Normaliser », en tâche de fond.
-- [x] Règles du script reprises : langues réglables (en, fr, ru par défaut), première piste de chaque
-      langue marquée `default`, note `Normalisé-pour-Emby(titre)`, migration de l'ancienne note à
-      espaces, conversion des `.ass`/`.ssa` externes, extraction des pistes texte (option), note sur
-      les `.srt` existants (option). Les bilingues du plugin ne reçoivent pas la note.
-- [x] Le plugin utilise le ffmpeg et le ffprobe livrés avec Emby quand il les trouve.
-- [x] Annotation des pistes intégrées aux `.mkv` (option) : proposée seulement si `mkvpropedit` est
-      installé ; sinon la page affiche un avertissement, qui disparaît une fois le paquet installé.
-- [ ] **Tester sur le NAS** : rien de tout cela n'a tourné dans Emby (testé hors serveur avec le
-      ffmpeg d'Emby, sans `mkvpropedit`).
-- [ ] Valider dans Emby l'affichage de la note à tirets et de la note sur la piste anglaise SDH.
-- [x] MKVToolNix installé sur le NAS (paquet SynoCommunity, DSM 7.3.2) : le plugin le trouve et
-      l'avertissement disparaît (11/10/2026).
-- [ ] Tester l'annotation des pistes `.mkv` sur un seul film, puis vérifier la note dans Emby
-      (dont la piste anglaise SDH).
-- [ ] Automatique : tâche planifiée Emby pour les nouveaux films.
-- Non repris du script : le nettoyage des anciens fichiers par date (opération ponctuelle déjà
-  faite) et l'installation automatique de MKVToolNix.
+## Fait
 
-## Décisions en attente
-
-- [ ] Fusion : les modes « chevauchement » et « priorité » n'ont pas exactement le même sens en
-      disposition haut/bas et en « tout en bas ». Unifier ou assumer.
-- [ ] Traduction : reprise après échec et écriture partielle (un échec au dernier lot perd tout).
-- [ ] Traduction : faut-il refuser d'écraser un `Film.fr.srt` existant ?
-- [ ] Refusion : supprimer automatiquement l'ancien `Film.dual.srt` quand le nouveau nom est créé ?
-- [ ] Écran de réglages (clé Anthropic, modèle, langue cible) au lieu du stockage dans le navigateur.
-- [ ] Renommage en tâche de fond si l'aperçu est trop lent sur le NAS.
-- [ ] Fusion rapide, script injecté et userscript : leur faire envoyer les langues et la disposition.
-
-## Dette
-
-- [ ] `MergeService.cs` : clé API Emby, identifiant utilisateur et `localhost:8096` écrits en dur,
-      dans un dépôt public.
-- [ ] README : décrire la traduction, le nommage, la disposition et le renommage ; corriger la
-      structure du projet et le changelog (arrêté à v8.6).
-- [ ] Sécuriser les endpoints du plugin (aucun ne vérifie l'authentification Emby).
-- [ ] Commiter les versions 9.0.0 à 9.1.0, puis fusionner la branche dans `main` après validation
-      sur le NAS.
+- [x] Traduction (Claude, puis Google Traduction gratuit), nommage bilingue, disposition haut/bas.
+- [x] Renommage des anciens `.dual.srt` ; mise de côté de ceux qu'il ne sait pas identifier (`_anciens_dual`).
+- [x] Normalisation ASS/SSA (reprise de `emby_subs.py`), ffmpeg d'Emby, détection de `mkvpropedit`,
+      une seule lecture de la vidéo par normalisation, tâche planifiée.
+- [x] Nettoyage par film ou pour toutes les médiathèques.
+- [x] Fusion et traduction en tâche de fond, annulation, normalisation à la volée des pistes ASS.
+- [x] Fusion en série, panneau de la fiche d'un film, page en onglets, thème clair.
+- [x] Adresses du plugin réservées aux administrateurs ; plus de clé ni d'adresse écrite en dur.
+- [x] README à jour.

@@ -10,7 +10,7 @@
          data-controller="configurationpage?name=subtitlemerger.js">
         <div data-role="content">
             <div class="content-primary">
-                <h1>Subtitle Merger <span style="font-size:0.5em; color:#888;">v9.11.0</span></h1>
+                <h1>Subtitle Merger <span style="font-size:0.5em; color:#888;">v9.12.0</span></h1>
 
                 <style>
                     .merger-card { background: rgba(0,0,0,0.2); border-radius: 8px; padding: 15px; margin-bottom: 15px; }
@@ -271,7 +271,7 @@
                                 </select>
                             </div>
                             <div class="option-group" id="anthropicKeyGroup" style="display:none;">
-                                <label for="anthropicApiKey">Cle API Anthropic (memorisee dans ce navigateur):</label>
+                                <label for="anthropicApiKey">Cle API Anthropic (enregistree sur le serveur):</label>
                                 <input type="password" id="anthropicApiKey" class="merger-text-input" placeholder="sk-ant-..." style="font-family:monospace;">
                             </div>
                         </div>
@@ -422,6 +422,53 @@
 
                 <!-- Onglet Maintenance : operations sur toutes les mediatheques -->
                 <div class="tab-panel" data-panel="tools">
+                    <div class="merger-card">
+                        <h3>Creer les bilingues en serie</h3>
+                        <p class="merger-help">
+                            Cree le sous-titre bilingue de chaque video qui a les deux langues et pas encore ce bilingue :
+                            toute une saison d'un coup, ou toute la bibliotheque. Pour chaque langue, l'outil prend un .srt pose a cote
+                            de la video s'il y en a un, sinon une piste texte de la video (jamais une piste forced ni une image).
+                            La disposition et les options sont celles de l'onglet Fusionner. Relancer ne refait que les nouvelles videos.
+                        </p>
+                        <div class="options-grid">
+                            <div class="option-group">
+                                <label for="batchLang1">Langue 1 (en haut):</label>
+                                <select id="batchLang1" is="emby-select"></select>
+                            </div>
+                            <div class="option-group">
+                                <label for="batchLang2">Langue 2 (en bas):</label>
+                                <select id="batchLang2" is="emby-select"></select>
+                            </div>
+                        </div>
+                        <div class="option-group" style="margin-top:12px;">
+                            <label for="batchScope">Perimetre:</label>
+                            <select id="batchScope" is="emby-select">
+                                <option value="folder">Le dossier du film ou de l'episode selectionne (une saison, par exemple)</option>
+                                <option value="all">Toutes les mediatheques</option>
+                            </select>
+                        </div>
+                        <div class="merger-actions">
+                            <button id="btnBatchPreview" type="button" is="emby-button" class="raised">
+                                <span>Apercu (ne modifie rien)</span>
+                            </button>
+                            <button id="btnBatchApply" type="button" is="emby-button" class="raised button-submit" style="display:none;">
+                                <span>Creer ces bilingues</span>
+                            </button>
+                        </div>
+                        <div id="batchProgress" style="display:none; margin-top:12px;">
+                            <div class="progress-track" style="margin-top:0;">
+                                <div id="batchProgressBar" class="progress-fill"></div>
+                            </div>
+                            <span id="batchProgressLabel" class="progress-label">Preparation...</span>
+                            <div class="merger-actions" style="margin-top:10px;">
+                                <button id="btnBatchCancel" type="button" is="emby-button" class="raised">
+                                    <span>Annuler</span>
+                                </button>
+                            </div>
+                        </div>
+                        <div id="batchResult" class="merger-result"></div>
+                    </div>
+
                     <div class="merger-card">
                         <h3>Nettoyer toutes les mediatheques</h3>
                         <p class="merger-help">

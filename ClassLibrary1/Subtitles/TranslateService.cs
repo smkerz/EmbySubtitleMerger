@@ -34,7 +34,7 @@ namespace EmbySubtitleMerger.Subtitles
         /// <summary>Code langue cible (ex: fr)</summary>
         public string? TargetLanguage { get; set; }
 
-        /// <summary>Moteur : "claude" (défaut, payant, avec clé) ou "google" (gratuit, sans clé)</summary>
+        /// <summary>Moteur : "google" (gratuit, sans clé) ou "claude" (payant, avec clé). À défaut, celui des réglages</summary>
         public string? Engine { get; set; }
 
         /// <summary>Clé API Anthropic pour le moteur Claude. À défaut, celle de la configuration du plugin est utilisée</summary>
@@ -141,7 +141,7 @@ namespace EmbySubtitleMerger.Subtitles
                 if (target == null)
                     return Fail($"Langue cible inconnue: {targetCode}");
 
-                var engine = string.IsNullOrWhiteSpace(request.Engine) ? TranslationEngines.Claude : request.Engine!.Trim().ToLowerInvariant();
+                var engine = (FirstNonBlank(request.Engine, config?.TranslationEngine) ?? TranslationEngines.Google).Trim().ToLowerInvariant();
                 if (!TranslationEngines.IsKnown(engine))
                     return Fail($"Moteur de traduction inconnu: {request.Engine}");
 
