@@ -62,11 +62,7 @@ namespace EmbySubtitleMerger.Subtitles
 
             try
             {
-                response.Folders = _libraryManager.GetVirtualFolders()
-                    .SelectMany(f => f.Locations ?? Array.Empty<string>())
-                    .Where(Directory.Exists)
-                    .Distinct(StringComparer.OrdinalIgnoreCase)
-                    .ToList();
+                response.Folders = LibraryFolders.All(_libraryManager);
 
                 var options = new EnumerationOptions
                 {

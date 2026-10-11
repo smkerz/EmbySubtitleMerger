@@ -1,7 +1,7 @@
 define([], function () {
     'use strict';
 
-    console.log('[SubMerger] Module loaded v8.9.0');
+    console.log('[SubMerger] Module loaded v9.8.0');
 
     var allMovies = [];      // Tous les medias charges
     var filteredMovies = []; // Medias filtres
@@ -13,10 +13,27 @@ define([], function () {
     var currentTranslationItemId = null; // Element Emby que ce job traduit
     var translationPollTimer = null;     // Timer de polling du statut
     var translationPollFailures = 0;     // Echecs consecutifs du polling
+    var normalizeJob = null;             // Id de la tache de normalisation en cours
+    var normalizeItemId = null;          // Element Emby vise, ou null pour toutes les mediatheques
+    var normalizePollTimer = null;
+    var normalizePollFailures = 0;
+    var normalizeFromLibrary = false;    // Nettoyage lance depuis l'onglet Maintenance, sur toutes les mediatheques
+    var normalizePreview = null;         // Derniere demande d'apercu : "Appliquer" la rejoue a l'identique
+    var normalizeJoined = false;         // La tache suivie est celle d'une autre demande, deja en cours
+    var normalizeBusy = false;           // Une normalisation ou un nettoyage est lance
+    var normalizeBlocked = false;        // ffmpeg ou ffprobe manque sur le serveur
     var pageVisible = false;             // La page du plugin est affichee
+    var mergeTimer = null;               // Minuteur du temps ecoule pendant une fusion
+    var mergeJob = null;                 // Id de la fusion en cours cote serveur
+    var mergeItemId = null;              // Element Emby de la fusion en cours
+    var mergeStep = '';                  // Etape annoncee par le serveur
+    var mergeStarted = 0;                // Debut de la fusion, pour le temps ecoule
+    var mergePollTimer = null;
+    var mergePollFailures = 0;
 
-    // Sections qui dependent du film et de la version selectionnes
-    var WORK_SECTIONS = ['#subtitlesSection', '#optionsSection', '#mergeModeSection', '#mergeSection', '#translateSection'];
+    // Contenus qui dependent du film selectionne, et le message affiche a leur place tant qu'aucun film n'est choisi
+    var WORK_SECTIONS = ['#mergeContent', '#translateContent'];
+    var WORK_HINTS = ['#mergeHint', '#translateHint'];
 
     function getApiClient() {
         return window.ApiClient;
@@ -29,8 +46,21 @@ define([], function () {
         return query ? url + '&' + query : url;
     }
 
+    // Un proxy ou Emby peut repondre par une page d'erreur HTML : on le dit clairement
+    // plutot que de laisser remonter une erreur d'analyse JSON.
+    function readJson(response) {
+        return response.text().then(function (text) {
+            try {
+                return JSON.parse(text);
+            } catch (e) {
+                throw new Error('reponse inattendue du serveur (HTTP ' + response.status + '). ' +
+                    'La requete a peut-etre ete coupee avant la fin.');
+            }
+        });
+    }
+
     function getPlugin(name, query) {
-        return fetch(pluginUrl(name, query)).then(function (r) { return r.json(); });
+        return fetch(pluginUrl(name, query)).then(readJson);
     }
 
     function postPlugin(name, body) {
@@ -38,7 +68,7 @@ define([], function () {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(body)
-        }).then(function (r) { return r.json(); });
+        }).then(readJson);
     }
 
     function escapeHtml(text) {
@@ -67,6 +97,26 @@ define([], function () {
             var section = view.querySelector(selector);
             if (section) section.style.display = visible ? 'block' : 'none';
         });
+        WORK_HINTS.forEach(function (selector) {
+            var hint = view.querySelector(selector);
+            if (hint) hint.style.display = visible ? 'none' : 'block';
+        });
+    }
+
+    // Affiche un onglet et memorise ce choix pour la prochaine visite
+    function selectTab(view, name) {
+        var tabs = view.querySelectorAll('.merger-tab');
+        var panels = view.querySelectorAll('.tab-panel');
+        var i;
+
+        for (i = 0; i < tabs.length; i++) {
+            tabs[i].classList.toggle('active', tabs[i].dataset.tab === name);
+        }
+        for (i = 0; i < panels.length; i++) {
+            panels[i].classList.toggle('active', panels[i].dataset.panel === name);
+        }
+
+        try { localStorage.setItem('submerger_tab', name); } catch (e) { }
     }
 
     function log(view, msg) {
@@ -74,7 +124,7 @@ define([], function () {
         var info = view.querySelector('#movieInfo');
         if (info) {
             info.textContent = msg;
-            info.className = 'status-box status-warning';
+            info.className = 'status-box status-info';
         }
     }
 
@@ -340,24 +390,31 @@ define([], function () {
                 var isText = s.IsTextSubtitleStream;
                 var isExternal = s.IsExternal || false;
                 var subPath = s.Path || '';
-                var label = '#' + s.Index + ' ';
+                var kind = describeTrack(s);
+                var label = kind.mark + ' #' + s.Index + ' ';
                 label += s.Language ? s.Language.toUpperCase() : 'UND';
                 label += ' (' + (s.Codec || '?') + ')';
                 label += isExternal ? ' [EXT]' : ' [INT]';
                 if (!isText) label += ' [IMAGE]';
+                label += ' : ' + kind.short;
                 // Ajouter le nom du fichier pour les sous-titres externes
                 if (isExternal && subPath) {
                     var fileName = subPath.split(/[\\/]/).pop();
                     if (fileName) label += ' - ' + fileName;
                 }
-                subs.push({ index: s.Index, label: label, isText: isText, isExternal: isExternal, path: subPath, lang: s.Language || '' });
+                subs.push({
+                    index: s.Index, label: label, isText: isText, isExternal: isExternal, path: subPath,
+                    lang: s.Language || '', warning: kind.warning
+                });
             }
         }
 
         var s1 = view.querySelector('#sub1');
         var s2 = view.querySelector('#sub2');
+        var translateSource = view.querySelector('#translateSource');
         s1.innerHTML = '<option value="">-- Choisir --</option>';
         s2.innerHTML = '<option value="">-- Choisir --</option>';
+        translateSource.innerHTML = '<option value="">-- Choisir --</option>';
 
         function makeOption(sub) {
             var option = document.createElement('option');
@@ -367,20 +424,25 @@ define([], function () {
             option.dataset.isExternal = sub.isExternal;
             option.dataset.path = sub.path;
             option.dataset.lang = sub.lang;
+            option.dataset.warning = sub.warning;
             return option;
         }
 
         for (var j = 0; j < subs.length; j++) {
             s1.appendChild(makeOption(subs[j]));
             s2.appendChild(makeOption(subs[j]));
+            translateSource.appendChild(makeOption(subs[j]));
         }
 
-        s1.onchange = function() { checkImageWarning(view); };
-        s2.onchange = function() { checkImageWarning(view); };
+        s1.onchange = function() { checkTrackWarnings(view); };
+        s2.onchange = function() { checkTrackWarnings(view); };
+        translateSource.onchange = function() { checkTranslateSourceWarning(view); };
+        checkTrackWarnings(view);
+        checkTranslateSourceWarning(view);
 
         setWorkSectionsVisible(view, true);
 
-        success(view, subs.length + ' sous-titres trouves');
+        success(view, getItemLabel(currentMovie) + ' : ' + subs.length + ' sous-titre(s) trouve(s). Choisissez une action dans les onglets ci-dessous.');
 
         checkCloudStatus(view);
     }
@@ -450,22 +512,66 @@ define([], function () {
             });
     }
 
-    function checkImageWarning(view) {
-        var s1 = view.querySelector('#sub1');
-        var s2 = view.querySelector('#sub2');
-        var warning = view.querySelector('#imageWarning');
+    // Ce que la fusion et la traduction peuvent faire de chaque type de piste.
+    // mark : [OK] utilisable, [!] utilisable avec une reserve, [X] non utilisable.
+    function describeTrack(stream) {
+        var codec = String(stream.Codec || '').toLowerCase();
+        var external = !!stream.IsExternal;
+        var info;
 
-        var sel1 = s1.options[s1.selectedIndex];
-        var sel2 = s2.options[s2.selectedIndex];
+        if (!stream.IsTextSubtitleStream) {
+            // Le detail est donne par l'encadre #imageWarning
+            info = { mark: '[X]', short: 'image, pas de texte a fusionner', warning: '' };
+        } else if (codec === 'ass' || codec === 'ssa') {
+            // Le serveur normalise la piste le temps de l'operation : conversion en SRT, codes de style retires
+            info = { mark: '[OK]', short: 'ASS, normalise automatiquement a la fusion', warning: '' };
+        } else if (codec === 'srt' || codec === 'subrip') {
+            info = { mark: '[OK]', short: 'pret pour la fusion', warning: '' };
+        } else if (!external) {
+            // MOV_TEXT, WEBVTT... : texte integre, converti a l'extraction
+            info = { mark: '[OK]', short: 'converti en SRT a la fusion', warning: '' };
+        } else {
+            info = { mark: '[!]', short: 'format externe, converti a la fusion',
+                warning: 'fichier externe au format ' + (stream.Codec || 'inconnu') + ' : il sera converti en SRT le temps de l\'operation, mais ce format n\'a pas ete verifie. Controlez le resultat.' };
+        }
+
+        var forced = !!stream.IsForced || /forced/i.test((stream.Title || '') + ' ' + (stream.DisplayTitle || ''));
+        if (forced && info.mark !== '[X]') {
+            info.mark = '[!]';
+            info.short += ', forced';
+            info.warning = 'piste "forced" : elle ne contient que quelques repliques (passages en langue etrangere). Le bilingue sera presque monolingue.'
+                + (info.warning ? ' De plus, ' + info.warning : '');
+        }
+
+        return info;
+    }
+
+    // Affiche les reserves des deux pistes choisies sous les listes
+    function checkTrackWarnings(view) {
+        var selects = [view.querySelector('#sub1'), view.querySelector('#sub2')];
+        var imageWarning = view.querySelector('#imageWarning');
+        var trackWarning = view.querySelector('#trackWarning');
 
         var hasImage = false;
-        if (sel1 && sel1.dataset.isText === 'false') hasImage = true;
-        if (sel2 && sel2.dataset.isText === 'false') hasImage = true;
+        var messages = [];
 
-        if (warning) {
-            warning.style.display = hasImage ? 'block' : 'none';
+        selects.forEach(function (select, position) {
+            var option = select.options[select.selectedIndex];
+            if (!option || !option.value) return;
+
+            if (option.dataset.isText === 'false') hasImage = true;
+            if (option.dataset.warning) {
+                messages.push('<strong>Sous-titre ' + (position + 1) + '</strong> - ' + escapeHtml(option.dataset.warning));
+            }
+        });
+
+        if (imageWarning) imageWarning.style.display = hasImage ? 'block' : 'none';
+        if (trackWarning) {
+            trackWarning.innerHTML = messages.join('<br><br>');
+            trackWarning.style.display = messages.length ? 'block' : 'none';
         }
     }
+
 
     function checkCloudStatus(view) {
         var cloudStatus = view.querySelector('#cloudStatus');
@@ -519,9 +625,15 @@ define([], function () {
         console.log('[SubMerger] Mode selected: ' + (useCloudApi ? 'DoubleSub.io' : 'Local'));
     }
 
+    // Message affiche a cote du bouton concerne, dans la zone de resultat de l'onglet
+    function showMessage(view, boxSelector, kind, message) {
+        console.log('[SubMerger] ' + kind + ': ' + message);
+        view.querySelector(boxSelector).innerHTML = statusBox(kind, escapeHtml(message));
+    }
+
     // Affiche le fichier produit, demande a Emby de le prendre en compte, puis recharge les pistes
-    function showProducedThenRefresh(view, itemId, html) {
-        var result = view.querySelector('#result');
+    function showProducedThenRefresh(view, boxSelector, itemId, html) {
+        var result = view.querySelector(boxSelector);
         result.innerHTML = statusBox('ok', html + '<br><em>Actualisation des metadonnees...</em>');
 
         refreshItemMetadata(view, itemId).then(function() {
@@ -533,42 +645,112 @@ define([], function () {
         });
     }
 
+    // La fusion tourne en tache de fond sur le serveur : l'extraction d'une piste d'un gros film
+    // dure plusieurs minutes. La barre affiche l'etape annoncee par le serveur et le temps ecoule.
+    function setMergeRunning(view, running) {
+        var label = view.querySelector('#mergeProgressLabel');
+
+        view.querySelector('#btnMerge').disabled = running;
+        view.querySelector('#mergeProgress').style.display = running ? 'block' : 'none';
+        clearInterval(mergeTimer);
+
+        if (running) {
+            var update = function () {
+                var seconds = Math.round((Date.now() - mergeStarted) / 1000);
+                label.textContent = (mergeStep || 'Fusion en cours') + '... ' + seconds + ' s' +
+                    (seconds >= 30 ? ' (plusieurs minutes pour un gros film)' : '');
+            };
+            update();
+            mergeTimer = setInterval(update, 1000);
+        }
+    }
+
+    function finishMerge(view, data) {
+        var itemId = mergeItemId;
+
+        mergeJob = null;
+        clearTimeout(mergePollTimer);
+        mergePollTimer = null;
+        setMergeRunning(view, false);
+
+        if (data.Success) {
+            showProducedThenRefresh(view, '#result', itemId,
+                '<strong>' + escapeHtml(data.Message) + '</strong><br><small>' + escapeHtml(data.OutputPath) + '</small>');
+        } else {
+            showMessage(view, '#result', 'error', data.Error);
+        }
+    }
+
+    function pollMerge(view) {
+        // Un seul suivi a la fois, meme apres un aller-retour rapide hors de la page
+        clearTimeout(mergePollTimer);
+        if (!mergeJob || !pageVisible) return;
+
+        getPlugin('MergeStatus', 'JobId=' + encodeURIComponent(mergeJob))
+            .then(function (data) {
+                mergePollFailures = 0;
+                if (!mergeJob) return;
+
+                if (data.Running) {
+                    mergeStep = data.Step || mergeStep;
+                    mergePollTimer = setTimeout(function () { pollMerge(view); }, 2000);
+                } else {
+                    console.log('[SubMerger] Merge response:', data);
+                    finishMerge(view, data);
+                }
+            })
+            .catch(function (e) {
+                console.error('[SubMerger] Merge status error:', e);
+                if (++mergePollFailures >= 10) {
+                    finishMerge(view, { Success: false, Error: 'Suivi de la fusion impossible : ' + e.message +
+                        ' La fusion continue peut-etre sur le serveur : rechargez les pistes dans quelques minutes.' });
+                } else {
+                    mergePollTimer = setTimeout(function () { pollMerge(view); }, 3000);
+                }
+            });
+    }
+
     function doMerge(view) {
         var sub1El = view.querySelector('#sub1');
         var sub2El = view.querySelector('#sub2');
         var v1 = sub1El.value;
         var v2 = sub2El.value;
-        var result = view.querySelector('#result');
 
         if (!currentMovie || !v1 || !v2) {
-            error(view, 'Selectionnez 2 sous-titres');
+            showMessage(view, '#result', 'warning', 'Choisissez les deux sous-titres a fusionner.');
             return;
         }
         if (v1 === v2) {
-            error(view, 'Choisissez 2 sous-titres differents');
+            showMessage(view, '#result', 'warning', 'Choisissez deux sous-titres differents.');
             return;
         }
 
         var sel1 = sub1El.options[sub1El.selectedIndex];
         var sel2 = sub2El.options[sub2El.selectedIndex];
 
+
         var doublesubApiKey = '';
         if (useCloudApi) {
             doublesubApiKey = view.querySelector('#apiKey').value.trim();
             if (!doublesubApiKey) {
-                error(view, 'Cle API DoubleSub.io requise pour le mode cloud');
+                showMessage(view, '#result', 'warning', 'Cle API DoubleSub.io requise pour le mode cloud (dans les options avancees).');
                 return;
             }
             if (!doublesubApiKey.startsWith('dsub_')) {
-                error(view, 'Cle API invalide (doit commencer par dsub_)');
+                showMessage(view, '#result', 'warning', 'Cle API DoubleSub.io invalide (elle doit commencer par dsub_).');
                 return;
             }
             localStorage.setItem('doublesub_api_key', doublesubApiKey);
         }
 
-        var cloud = useCloudApi;
-        var itemId = currentMovie.Id;
-        log(view, 'Fusion ' + (cloud ? 'DoubleSub.io' : 'locale') + ' en cours...');
+
+        mergeItemId = currentMovie.Id;
+        mergeStep = '';
+        mergeStarted = Date.now();
+        mergePollFailures = 0;
+
+        view.querySelector('#result').innerHTML = '';
+        setMergeRunning(view, true);
 
         postPlugin('Merge', {
             VideoPath: currentVideoPath(),
@@ -585,23 +767,22 @@ define([], function () {
             Offset1Ms: parseInt(view.querySelector('#offset1').value) || 0,
             Offset2Ms: parseInt(view.querySelector('#offset2').value) || 0,
             Layout: view.querySelector('#layout').value,
-            UseCloudApi: cloud,
-            DoubleSubApiKey: doublesubApiKey
+            UseCloudApi: useCloudApi,
+            DoubleSubApiKey: doublesubApiKey,
+            Background: true
         })
         .then(function (data) {
-            console.log('[SubMerger] Merge response:', data);
-            if (data.Success) {
-                success(view, 'Fusion reussie! ' + data.CueCount + ' sous-titres' + (cloud ? ' (via DoubleSub.io)' : ' (local)'));
-                showProducedThenRefresh(view, itemId,
-                    '<strong>' + escapeHtml(data.Message) + '</strong><br><small>' + escapeHtml(data.OutputPath) + '</small>');
+            if (data.Running && data.JobId) {
+                mergeJob = data.JobId;
+                mergeStep = data.Step || '';
+                pollMerge(view);
             } else {
-                error(view, 'Erreur: ' + data.Error);
-                result.innerHTML = statusBox('error', escapeHtml(data.Error));
+                finishMerge(view, data);
             }
         })
         .catch(function (e) {
             console.error('[SubMerger] Merge error:', e);
-            error(view, 'Erreur: ' + e.message);
+            finishMerge(view, { Success: false, Error: 'Erreur: ' + e.message });
         });
     }
 
@@ -639,26 +820,42 @@ define([], function () {
         setTranslateRunning(view, false);
     }
 
-    function doTranslate(view) {
-        var result = view.querySelector('#result');
+    // Reserve de la piste choisie pour la traduction, affichee sous la liste
+    function checkTranslateSourceWarning(view) {
+        var select = view.querySelector('#translateSource');
+        var box = view.querySelector('#translateSourceWarning');
+        var option = select.options[select.selectedIndex];
 
+        var message = '';
+        if (option && option.value) {
+            message = option.dataset.isText === 'false'
+                ? 'sous-titre image : il ne contient pas de texte, il ne peut pas etre traduit.'
+                : (option.dataset.warning || '');
+        }
+
+        box.textContent = message;
+        box.style.display = message ? 'block' : 'none';
+    }
+
+    function doTranslate(view) {
         if (!currentMovie) {
-            error(view, 'Selectionnez d\'abord un film ou un episode');
+            showMessage(view, '#translateResult', 'warning', 'Choisissez d\'abord un film ou un episode.');
             return;
         }
 
-        var sourceEl = view.querySelector('#sub1');
+        var sourceEl = view.querySelector('#translateSource');
         var sourceValue = sourceEl.value;
         if (!sourceValue) {
-            error(view, 'Choisissez la piste a traduire dans "Sous-titre 1"');
+            showMessage(view, '#translateResult', 'warning', 'Choisissez le sous-titre a traduire.');
             return;
         }
 
         var selected = sourceEl.options[sourceEl.selectedIndex];
         if (selected.dataset.isText === 'false') {
-            error(view, 'La traduction ne fonctionne que sur les sous-titres texte (pas les sous-titres image)');
+            showMessage(view, '#translateResult', 'warning', 'La traduction ne fonctionne que sur les sous-titres texte, pas sur les sous-titres image.');
             return;
         }
+
 
         // La cle n'est memorisee que dans ce navigateur ; vider le champ l'oublie
         var anthropicKey = view.querySelector('#anthropicApiKey').value.trim();
@@ -670,7 +867,7 @@ define([], function () {
 
         var itemId = currentMovie.Id;
 
-        log(view, 'Demarrage de la traduction...');
+        view.querySelector('#translateResult').innerHTML = '';
         setTranslateRunning(view, true);
 
         postPlugin('Translate', {
@@ -690,8 +887,7 @@ define([], function () {
             console.log('[SubMerger] Translate response:', data);
             if (!data.Success) {
                 setTranslateRunning(view, false);
-                error(view, 'Erreur: ' + data.Error);
-                result.innerHTML = statusBox('error', escapeHtml(data.Error));
+                showMessage(view, '#translateResult', 'error', data.Error);
                 return;
             }
             currentTranslationJob = data.JobId;
@@ -702,7 +898,7 @@ define([], function () {
         .catch(function (e) {
             setTranslateRunning(view, false);
             console.error('[SubMerger] Translate error:', e);
-            error(view, 'Erreur: ' + e.message);
+            showMessage(view, '#translateResult', 'error', 'Erreur: ' + e.message);
         });
     }
 
@@ -720,8 +916,6 @@ define([], function () {
         var jobId = currentTranslationJob;
         if (!jobId) return;
 
-        var result = view.querySelector('#result');
-
         getPlugin('TranslateStatus', 'JobId=' + encodeURIComponent(jobId))
             .then(function (data) {
                 if (jobId !== currentTranslationJob) return;
@@ -729,7 +923,7 @@ define([], function () {
 
                 if (!data.Found) {
                     stopFollowingTranslation(view);
-                    error(view, 'Job de traduction introuvable ou expire');
+                    showMessage(view, '#translateResult', 'error', 'Tache de traduction introuvable ou expiree.');
                     return;
                 }
 
@@ -752,14 +946,11 @@ define([], function () {
                     }
                     html += '<br><small style="color:#888;">' + data.InputTokens + ' tokens entree / ' + data.OutputTokens + ' sortie</small>';
 
-                    success(view, 'Traduction terminee');
-                    showProducedThenRefresh(view, itemId, html);
+                    showProducedThenRefresh(view, '#translateResult', itemId, html);
                 } else if (data.Status === 'Cancelled') {
-                    log(view, 'Traduction annulee');
-                    result.innerHTML = statusBox('warning', 'Traduction annulee.');
+                    showMessage(view, '#translateResult', 'warning', 'Traduction annulee.');
                 } else {
-                    error(view, 'Echec: ' + (data.Error || 'erreur inconnue'));
-                    result.innerHTML = statusBox('error', escapeHtml(data.Error || 'Erreur inconnue'));
+                    showMessage(view, '#translateResult', 'error', data.Error || 'Erreur inconnue');
                 }
             })
             .catch(function (e) {
@@ -770,7 +961,7 @@ define([], function () {
                 translationPollFailures++;
                 if (translationPollFailures >= 10) {
                     stopFollowingTranslation(view);
-                    error(view, 'Suivi interrompu : le serveur ne repond plus. La traduction continue peut-etre cote serveur.');
+                    showMessage(view, '#translateResult', 'error', 'Suivi interrompu : le serveur ne repond plus. La traduction continue peut-etre cote serveur.');
                     return;
                 }
                 schedulePoll(view, 5000);
@@ -780,7 +971,7 @@ define([], function () {
     function cancelTranslation(view) {
         if (!currentTranslationJob) return;
 
-        log(view, 'Annulation demandee...');
+        view.querySelector('#translateProgressLabel').textContent = 'Annulation demandee...';
 
         postPlugin('TranslateCancel', { JobId: currentTranslationJob }).catch(function (e) {
             console.error('[SubMerger] Cancel error:', e);
@@ -827,7 +1018,7 @@ define([], function () {
                 var target = item.NewName ? ' &rarr; <strong>' + escapeHtml(item.NewName) + '</strong>' : '';
                 return '<div style="padding:6px 8px; margin:4px 0; background:rgba(0,0,0,0.3); border-left:3px solid ' + color + '; border-radius:4px; font-size:0.85em;">'
                     + escapeHtml(item.OldPath) + target
-                    + '<br><span style="color:#9fb0c2;">' + escapeHtml(item.Detail) + '</span></div>';
+                    + '<br><span style="color: inherit; opacity: 0.75;">' + escapeHtml(item.Detail) + '</span></div>';
             }).join('');
 
             box.innerHTML = statusBox(data.Errors > 0 ? 'warning' : 'ok', '<strong>' + summary + '</strong>') + rows;
@@ -840,6 +1031,299 @@ define([], function () {
             btnApply.disabled = false;
             console.error('[SubMerger] Rename error:', e);
             box.innerHTML = statusBox('error', 'Erreur: ' + escapeHtml(e.message));
+        });
+    }
+
+    // ---------- Normalisation (ASS/SSA vers SRT) ----------
+
+    // Signale les programmes manquants sur le serveur. L'avertissement disparait
+    // de lui-meme une fois le programme installe : la verification est refaite a chaque affichage.
+    function checkNormalizeTools(view) {
+        var box = view.querySelector('#normalizeTools');
+        var tagMkv = view.querySelector('#normalizeTagMkv');
+
+        getPlugin('Tools')
+            .then(function (data) {
+                var messages = [];
+                var blocking = !data.FfmpegAvailable || !data.FfprobeAvailable;
+
+                if (blocking) {
+                    messages.push('<strong>ffmpeg ou ffprobe est introuvable sur le serveur.</strong> La normalisation ne peut pas fonctionner sans eux.');
+                }
+                if (!data.MkvPropEditAvailable) {
+                    messages.push('<strong>MKVToolNix n\'est pas installe sur le serveur.</strong> Tout fonctionne sauf la modification du titre des pistes integrees aux .mkv (ajout ou retrait de la note). '
+                        + 'Sur un Synology : Centre de paquets, source <em>https://packages.synocommunity.com</em>, paquet MKVToolNix. Ce message disparaitra une fois le paquet installe.');
+                }
+
+                tagMkv.disabled = !data.MkvPropEditAvailable;
+                if (!data.MkvPropEditAvailable) tagMkv.checked = false;
+                normalizeBlocked = blocking;
+                refreshNormalizeButtons(view);
+
+                box.className = 'status-box ' + (blocking ? 'status-error' : 'status-warning');
+                box.innerHTML = messages.join('<br><br>');
+                box.style.display = messages.length ? 'block' : 'none';
+            })
+            .catch(function (e) {
+                console.error('[SubMerger] Tools check error:', e);
+            });
+    }
+
+    // Le nettoyage existe a deux endroits : onglet Normaliser (film choisi ou tout) et onglet Maintenance
+    // (toutes les mediatheques). Chacun a ses cases, sa barre et sa zone de resultat.
+    var NORMALIZE_UI = {
+        tab: {
+            progress: '#normalizeProgress', bar: '#normalizeProgressBar', label: '#normalizeProgressLabel',
+            result: '#normalizeResult', cleanupApply: '#btnCleanupApply',
+            conversions: '#cleanupConversions', bilingual: '#cleanupBilingual', note: '#cleanupNote'
+        },
+        library: {
+            progress: '#libProgress', bar: '#libProgressBar', label: '#libProgressLabel',
+            result: '#libResult', cleanupApply: '#btnLibCleanupApply',
+            conversions: '#libCleanupConversions', bilingual: '#libCleanupBilingual', note: '#libCleanupNote'
+        }
+    };
+
+    function normalizeUi(view, name) {
+        return view.querySelector(NORMALIZE_UI[normalizeFromLibrary ? 'library' : 'tab'][name]);
+    }
+
+    var NORMALIZE_APPLY_BUTTONS = ['#btnNormalizeApply', '#btnCleanupApply', '#btnLibCleanupApply'];
+
+    // Les boutons sont grises pendant une tache, et tant que ffmpeg ou ffprobe manque
+    function refreshNormalizeButtons(view) {
+        ['#btnNormalizePreview', '#btnCleanupPreview', '#btnLibCleanupPreview'].concat(NORMALIZE_APPLY_BUTTONS).forEach(function (selector) {
+            view.querySelector(selector).disabled = normalizeBusy || normalizeBlocked;
+        });
+    }
+
+    // Un reglage a change depuis l'apercu : ce qu'il montre n'est plus ce qui serait execute
+    function invalidateNormalizePreview(view) {
+        normalizePreview = null;
+        NORMALIZE_APPLY_BUTTONS.forEach(function (selector) {
+            view.querySelector(selector).style.display = 'none';
+        });
+    }
+
+    // La normalisation et le nettoyage partagent la meme tache de fond : une seule a la fois
+    function setNormalizeRunning(view, running) {
+        normalizeBusy = running;
+        refreshNormalizeButtons(view);
+        view.querySelector('#normalizeProgress').style.display = 'none';
+        view.querySelector('#libProgress').style.display = 'none';
+        normalizeUi(view, 'progress').style.display = running ? 'block' : 'none';
+    }
+
+    function stopFollowingNormalize(view) {
+        normalizeJob = null;
+        normalizePollFailures = 0;
+        setNormalizeRunning(view, false);
+    }
+
+    // cleanup = true : retire les .srt generes au lieu d'en creer
+    // fromLibrary = true : nettoyage de l'onglet Maintenance, toujours sur toutes les mediatheques
+    function startNormalize(view, dryRun, cleanup, fromLibrary) {
+        var preview = normalizePreview;
+        var body;
+
+        if (dryRun) {
+            normalizeFromLibrary = !!fromLibrary;
+
+            var wholeLibrary = normalizeFromLibrary || view.querySelector('#normalizeScope').value === 'all';
+            if (!wholeLibrary && !currentMovie) {
+                normalizeUi(view, 'result').innerHTML = statusBox('warning', 'Selectionnez d\'abord un film ou un episode, ou choisissez "Toutes les mediatheques".');
+                return;
+            }
+
+            body = {
+                DryRun: true,
+                Cleanup: !!cleanup,
+                CleanupConversions: normalizeUi(view, 'conversions').checked,
+                CleanupBilingual: normalizeUi(view, 'bilingual').checked,
+                CleanupNote: normalizeUi(view, 'note').checked,
+                VideoPath: wholeLibrary ? '' : currentVideoPath(),
+                Languages: view.querySelector('#normalizeLanguages').value,
+                Overwrite: view.querySelector('#normalizeOverwrite').checked,
+                ExtractText: view.querySelector('#normalizeExtract').checked,
+                Annotate: view.querySelector('#normalizeAnnotate').checked,
+                TagMkvTracks: view.querySelector('#normalizeTagMkv').checked
+            };
+            preview = { body: body, itemId: wholeLibrary ? null : currentMovie.Id, fromLibrary: normalizeFromLibrary };
+        } else {
+            // "Appliquer" rejoue la demande de l'apercu telle quelle : on execute ce qui a ete montre,
+            // meme si le film, le perimetre ou une case a change depuis
+            if (!preview) return;
+            normalizeFromLibrary = preview.fromLibrary;
+            body = Object.assign({}, preview.body, { DryRun: false });
+        }
+
+        var box = normalizeUi(view, 'result');
+        normalizeItemId = preview.itemId;
+        normalizeJoined = false;
+
+        invalidateNormalizePreview(view);
+        if (dryRun) normalizePreview = preview;
+
+        setNormalizeRunning(view, true);
+        normalizeUi(view, 'bar').style.width = '0%';
+        normalizeUi(view, 'label').textContent = 'Preparation...';
+        box.innerHTML = '';
+
+        postPlugin('Normalize', body)
+        .then(function (data) {
+            if (!data.Success) {
+                setNormalizeRunning(view, false);
+                box.innerHTML = statusBox('error', escapeHtml(data.Error));
+                return;
+            }
+            normalizeJob = data.JobId;
+            normalizeJoined = !!data.AlreadyRunning;
+            if (normalizeJoined) normalizePreview = null;
+            normalizePollFailures = 0;
+            pollNormalize(view);
+        })
+        .catch(function (e) {
+            setNormalizeRunning(view, false);
+            console.error('[SubMerger] Normalize error:', e);
+            box.innerHTML = statusBox('error', 'Erreur: ' + escapeHtml(e.message));
+        });
+    }
+
+    function scheduleNormalizePoll(view, delayMs) {
+        clearTimeout(normalizePollTimer);
+        if (!pageVisible) return;
+
+        normalizePollTimer = setTimeout(function () {
+            pollNormalize(view);
+        }, delayMs);
+    }
+
+    function pollNormalize(view) {
+        var jobId = normalizeJob;
+        if (!jobId) return;
+
+        var box = normalizeUi(view, 'result');
+
+        getPlugin('NormalizeStatus', 'JobId=' + encodeURIComponent(jobId))
+            .then(function (data) {
+                if (jobId !== normalizeJob) return;
+                normalizePollFailures = 0;
+
+                if (!data.Found) {
+                    stopFollowingNormalize(view);
+                    box.innerHTML = statusBox('error', 'Tache introuvable ou expiree.');
+                    return;
+                }
+
+                normalizeUi(view, 'bar').style.width = (data.PercentComplete || 0) + '%';
+                normalizeUi(view, 'label').textContent =
+                    (data.Message || 'Analyse...') + (data.Total > 0 ? ' (' + data.Processed + '/' + data.Total + ')' : '');
+
+                if (data.Status === 'Running' || data.Status === 'Pending') {
+                    scheduleNormalizePoll(view, 2000);
+                    return;
+                }
+
+                stopFollowingNormalize(view);
+                showNormalizeResult(view, data);
+            })
+            .catch(function (e) {
+                console.error('[SubMerger] Normalize poll error:', e);
+                if (jobId !== normalizeJob) return;
+
+                normalizePollFailures++;
+                if (normalizePollFailures >= 10) {
+                    stopFollowingNormalize(view);
+                    box.innerHTML = statusBox('error', 'Suivi interrompu : le serveur ne repond plus. La tache continue peut-etre cote serveur.');
+                    return;
+                }
+                scheduleNormalizePoll(view, 5000);
+            });
+    }
+
+    function showNormalizeResult(view, data) {
+        var box = normalizeUi(view, 'result');
+        var btnApply = data.Cleanup ? normalizeUi(view, 'cleanupApply') : view.querySelector('#btnNormalizeApply');
+
+        if (data.Status === 'Cancelled') {
+            box.innerHTML = statusBox('warning', data.Cleanup ? 'Nettoyage annule.' : 'Normalisation annulee.');
+            return;
+        }
+        if (data.Status !== 'Completed') {
+            box.innerHTML = statusBox('error', escapeHtml(data.Error || 'Erreur inconnue'));
+            return;
+        }
+
+        var changes = data.Created + data.Renamed + data.Tagged + data.Deleted;
+        var summary;
+        if (data.Cleanup) {
+            var notes = data.Renamed + data.Tagged;
+            if (changes === 0 && data.Failures === 0) {
+                summary = 'Rien a nettoyer (' + data.Total + ' video(s) examinees).';
+            } else if (data.DryRun) {
+                summary = 'Apercu : ' + data.Deleted + ' fichier(s) a supprimer'
+                    + (notes > 0 ? ', ' + data.Renamed + ' fichier(s) a renommer et ' + data.Tagged + ' titre(s) de piste a raccourcir' : '') + '.';
+            } else {
+                summary = data.Deleted + ' fichier(s) supprime(s), '
+                    + (notes > 0 ? data.Renamed + ' fichier(s) renomme(s), ' + data.Tagged + ' titre(s) de piste raccourci(s), ' : '')
+                    + data.Failures + ' echec(s).';
+                if (changes > 0) summary += ' Analyse de la mediatheque demandee.';
+            }
+        } else if (changes === 0 && data.Failures === 0) {
+            summary = 'Rien a faire : aucun sous-titre a convertir, renommer ou annoter (' + data.Total + ' fichier(s) examines).';
+        } else if (data.DryRun) {
+            summary = 'Apercu : ' + data.Created + ' .srt a creer, ' + data.Renamed + ' fichier(s) a renommer, ' + data.Tagged + ' piste(s) a annoter.';
+        } else {
+            summary = data.Created + ' .srt cree(s), ' + data.Renamed + ' fichier(s) renomme(s), ' + data.Tagged + ' piste(s) annotee(s), ' + data.Failures + ' echec(s).';
+            if (changes > 0) summary += ' Analyse de la mediatheque demandee.';
+        }
+        if (data.ImageTracks > 0) {
+            summary += ' ' + data.ImageTracks + ' sous-titre(s) image (PGS/VOBSUB) non convertis.';
+        }
+
+        var rows = data.Actions.map(function (action) {
+            var color = action.Status === 'Failed' ? '#f44336'
+                : ((action.Kind === 'Info' || action.Kind === 'Delete') ? '#ff9800' : '#4CAF50');
+            var detail = action.Detail || '';
+            if (action.Kind === 'Delete' && action.Status !== 'Failed') {
+                detail = (data.DryRun ? 'A supprimer : ' : 'Supprime : ') + detail;
+            }
+            var target = action.Target ? ' &rarr; <strong>' + escapeHtml(action.Target) + '</strong>' : '';
+            return '<div style="padding:6px 8px; margin:4px 0; background:rgba(0,0,0,0.3); border-left:3px solid ' + color + '; border-radius:4px; font-size:0.85em;">'
+                + escapeHtml(String(action.Source || '').split(/[\\/]/).pop()) + target
+                + '<br><span style="color: inherit; opacity: 0.75;">' + escapeHtml(detail) + '</span></div>';
+        }).join('');
+
+        var listed = data.ActionsTruncated
+            ? '<p style="color: inherit; opacity: 0.75; font-size:0.85em;">Seules les ' + data.Actions.length + ' premieres lignes sont affichees ; les totaux ci-dessus sont complets.</p>'
+            : '';
+
+        var joined = normalizeJoined
+            ? statusBox('warning', 'Une autre normalisation ou un autre nettoyage etait deja en cours : voici son resultat. Relancez votre demande.')
+            : '';
+
+        box.innerHTML = joined + statusBox(data.Failures > 0 ? 'warning' : 'ok', '<strong>' + summary + '</strong>') + rows + listed;
+
+        // Le bouton d'execution n'apparait qu'apres un apercu qui a quelque chose a faire,
+        // et seulement si cet apercu est bien celui de la demande memorisee
+        btnApply.style.display = (data.DryRun && changes > 0 && normalizePreview && !normalizeJoined) ? 'inline-block' : 'none';
+
+        // Apres une vraie operation sur un seul film, ses pistes sont rechargees
+        if (!data.DryRun && changes > 0 && normalizeItemId) {
+            var itemId = normalizeItemId;
+            refreshItemMetadata(view, itemId).then(function () {
+                if (currentMovie && currentMovie.Id === itemId) {
+                    reloadCurrentMovie(view);
+                }
+            });
+        }
+    }
+
+    function cancelNormalize() {
+        if (!normalizeJob) return;
+
+        postPlugin('NormalizeCancel', { JobId: normalizeJob }).catch(function (e) {
+            console.error('[SubMerger] Normalize cancel error:', e);
         });
     }
 
@@ -880,10 +1364,39 @@ define([], function () {
 
         on('#btnRenamePreview', 'click', function () { renameLegacyDual(view, true); });
         on('#btnRenameApply', 'click', function () { renameLegacyDual(view, false); });
+
+        on('#btnNormalizePreview', 'click', function () { startNormalize(view, true, false); });
+        on('#btnNormalizeApply', 'click', function () { startNormalize(view, false, false); });
+        on('#btnCleanupPreview', 'click', function () { startNormalize(view, true, true); });
+        on('#btnCleanupApply', 'click', function () { startNormalize(view, false, true); });
+        on('#btnNormalizeCancel', 'click', function () { cancelNormalize(); });
+        on('#btnLibCleanupPreview', 'click', function () { startNormalize(view, true, true, true); });
+        on('#btnLibCleanupApply', 'click', function () { startNormalize(view, false, true, true); });
+        on('#btnLibCancel', 'click', function () { cancelNormalize(); });
+
+        ['#normalizeScope', '#normalizeLanguages', '#normalizeAnnotate', '#normalizeTagMkv', '#normalizeExtract', '#normalizeOverwrite',
+            '#cleanupConversions', '#cleanupBilingual', '#cleanupNote',
+            '#libCleanupConversions', '#libCleanupBilingual', '#libCleanupNote',
+            '#moviesSelect', '#versionSelect'].forEach(function (selector) {
+            on(selector, 'change', function () { invalidateNormalizePreview(view); });
+            on(selector, 'input', function () { invalidateNormalizePreview(view); });
+        });
+
+        var tabs = view.querySelectorAll('.merger-tab');
+        for (var t = 0; t < tabs.length; t++) {
+            tabs[t].addEventListener('click', function () { selectTab(view, this.dataset.tab); });
+        }
+
+        // Dernier onglet utilise
+        var savedTab = null;
+        try { savedTab = localStorage.getItem('submerger_tab'); } catch (e) { }
+        if (savedTab && view.querySelector('.tab-panel[data-panel="' + savedTab + '"]')) {
+            selectTab(view, savedTab);
+        }
     }
 
     return function (view) {
-        console.log('[SubMerger] Controller init v8.9.0');
+        console.log('[SubMerger] Controller init v9.8.0');
 
         var bound = false;
 
@@ -905,20 +1418,40 @@ define([], function () {
                 anthropicInput.value = savedAnthropicKey;
             }
 
+            checkNormalizeTools(view);
+            if (normalizeJob) {
+                // Une normalisation tournait quand la page a ete quittee : on reprend son suivi
+                setNormalizeRunning(view, true);
+                pollNormalize(view);
+            }
+
+            if (mergeJob) {
+                // Une fusion tournait quand la page a ete quittee : on reprend son suivi
+                setMergeRunning(view, true);
+                pollMerge(view);
+            }
+
             if (currentTranslationJob) {
                 // Une traduction tournait quand la page a ete quittee : on reprend son suivi
                 setTranslateRunning(view, true);
                 pollTranslation(view);
             } else {
-                log(view, 'Pret - Selectionnez les filtres puis cliquez sur Charger');
+                if (!currentMovie) {
+                    log(view, 'Choisissez une mediatheque puis cliquez sur "Charger la liste".');
+                }
             }
         });
 
-        // Quitter la page suspend le suivi ; la traduction continue cote serveur
+        // Quitter la page suspend le suivi ; les taches continuent cote serveur
         view.addEventListener('viewhide', function () {
             pageVisible = false;
+            clearInterval(mergeTimer);
             clearTimeout(translationPollTimer);
             translationPollTimer = null;
+            clearTimeout(normalizePollTimer);
+            normalizePollTimer = null;
+            clearTimeout(mergePollTimer);
+            mergePollTimer = null;
         });
     };
 });

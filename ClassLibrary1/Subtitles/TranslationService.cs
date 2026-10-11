@@ -1,5 +1,4 @@
 using System;
-using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
@@ -8,35 +7,12 @@ using System.Threading.Tasks;
 namespace EmbySubtitleMerger.Subtitles
 {
     /// <summary>
-    /// État d'un job de traduction
+    /// Job de traduction d'un sous-titre
     /// </summary>
-    public enum TranslationJobStatus
+    public class TranslationJob : BackgroundJob
     {
-        Pending,
-        Running,
-        Completed,
-        Failed,
-        Cancelled
-    }
-
-    /// <summary>
-    /// Job de traduction suivi en mémoire.
-    /// Une traduction complète prend plusieurs minutes : on ne peut pas la faire
-    /// tenir dans une requête HTTP synchrone, d'où ce suivi par polling.
-    /// </summary>
-    public class TranslationJob
-    {
-        public string Id { get; } = Guid.NewGuid().ToString("N");
-        public TranslationJobStatus Status { get; set; } = TranslationJobStatus.Pending;
-
-        public int Processed { get; set; }
-        public int Total { get; set; }
-
         /// <summary>Répliques que le modèle n'a pas renvoyées et qui gardent le texte d'origine</summary>
         public int Untranslated { get; set; }
-
-        public string? Message { get; set; }
-        public string? Error { get; set; }
 
         /// <summary>Chemin du SRT traduit</summary>
         public string? OutputPath { get; set; }
@@ -46,62 +22,6 @@ namespace EmbySubtitleMerger.Subtitles
 
         public int InputTokens { get; set; }
         public int OutputTokens { get; set; }
-
-        public DateTime? FinishedAt { get; set; }
-
-        internal CancellationTokenSource Cancellation { get; } = new CancellationTokenSource();
-
-        public int PercentComplete => Total <= 0 ? 0 : (int)Math.Round(100.0 * Processed / Total);
-    }
-
-    /// <summary>
-    /// Stockage en mémoire des jobs de traduction en cours et récents
-    /// </summary>
-    public static class TranslationJobStore
-    {
-        private static readonly ConcurrentDictionary<string, TranslationJob> Jobs =
-            new ConcurrentDictionary<string, TranslationJob>();
-
-        private static readonly TimeSpan RetentionPeriod = TimeSpan.FromHours(1);
-
-        public static TranslationJob Create()
-        {
-            PurgeExpired();
-            var job = new TranslationJob();
-            Jobs[job.Id] = job;
-            return job;
-        }
-
-        public static TranslationJob? Get(string? id)
-        {
-            if (string.IsNullOrEmpty(id)) return null;
-            return Jobs.TryGetValue(id!, out var job) ? job : null;
-        }
-
-        public static bool Cancel(string? id)
-        {
-            var job = Get(id);
-            if (job == null) return false;
-
-            if (job.Status == TranslationJobStatus.Running || job.Status == TranslationJobStatus.Pending)
-            {
-                job.Cancellation.Cancel();
-                return true;
-            }
-            return false;
-        }
-
-        /// <summary>Retire les jobs terminés depuis plus d'une heure</summary>
-        private static void PurgeExpired()
-        {
-            var cutoff = DateTime.UtcNow - RetentionPeriod;
-            foreach (var kvp in Jobs)
-            {
-                var finished = kvp.Value.FinishedAt;
-                if (finished.HasValue && finished.Value < cutoff)
-                    Jobs.TryRemove(kvp.Key, out _);
-            }
-        }
     }
 
     /// <summary>
@@ -251,7 +171,7 @@ namespace EmbySubtitleMerger.Subtitles
         {
             try
             {
-                job.Status = TranslationJobStatus.Running;
+                job.Status = JobStatus.Running;
                 job.Message = "Lecture du sous-titre source…";
 
                 var cues = SrtParser.ParseFile(sourceSrtPath);
@@ -278,17 +198,17 @@ namespace EmbySubtitleMerger.Subtitles
                 // Avant Completed : la page arrête de suivre le job dès qu'elle voit ce statut
                 afterTranslation?.Invoke(cues, translated);
 
-                job.Status = TranslationJobStatus.Completed;
+                job.Status = JobStatus.Completed;
             }
             catch (OperationCanceledException)
             {
-                job.Status = TranslationJobStatus.Cancelled;
+                job.Status = JobStatus.Cancelled;
                 job.Message = "Traduction annulée.";
                 Plugin.Log("[Translate] Annulé par l'utilisateur");
             }
             catch (Exception ex)
             {
-                job.Status = TranslationJobStatus.Failed;
+                job.Status = JobStatus.Failed;
                 job.Error = ex.Message;
                 job.Message = "Échec de la traduction.";
                 Plugin.Log($"[Translate] ERREUR: {ex}");

@@ -141,6 +141,28 @@ namespace EmbySubtitleMerger.Subtitles
         }
 
         /// <summary>
+        /// Indique si un nom de fichier est celui d'un bilingue créé par ce plugin pour la vidéo donnée :
+        /// l'ancien Film.dual.srt, ou la forme exacte produite par DualFileName avec deux langues du catalogue.
+        /// </summary>
+        public static bool IsDualFileName(string videoName, string fileName)
+        {
+            if (!fileName.StartsWith(videoName + ".", StringComparison.Ordinal)) return false;
+
+            if (fileName.Equals(videoName + LegacyDualSuffix, StringComparison.OrdinalIgnoreCase)) return true;
+
+            // "Français + English.fr.srt"
+            var parts = fileName.Substring(videoName.Length + 1).Split('.');
+            if (parts.Length != 3 || !parts[2].Equals("srt", StringComparison.OrdinalIgnoreCase)) return false;
+
+            var names = parts[0].Split(new[] { " + " }, StringSplitOptions.None);
+            if (names.Length != 2) return false;
+
+            var top = Resolve(names[0]);
+            var bottom = Resolve(names[1]);
+            return top != null && bottom != null && top.NativeName == names[0] && bottom.NativeName == names[1] && top.Code == parts[1];
+        }
+
+        /// <summary>
         /// Chemin du sous-titre bilingue d'une vidéo, à côté de celle-ci
         /// </summary>
         public static string DualPath(string videoPath, LanguageInfo? top, LanguageInfo? bottom)
@@ -183,7 +205,7 @@ namespace EmbySubtitleMerger.Subtitles
 
             if (top == null || bottom == null)
             {
-                detail = "Impossible d'identifier les deux langues de ce fichier ou leur ordre.";
+                detail = pair.Reason ?? "Langue non prise en charge pour le nommage.";
                 return null;
             }
 
@@ -205,7 +227,19 @@ namespace EmbySubtitleMerger.Subtitles
         private const double MinScore = 15;
 
         /// <summary>La seconde langue doit peser au moins cette part de la première</summary>
-        private const double MinSecondShare = 0.2;
+        private const double MinSecondShare = 0.15;
+
+        /// <summary>
+        /// Part des mots d'un texte latin que la liste de mots courants reconnaît, environ.
+        /// Appliquée aux écritures où tous les mots comptent, pour comparer à échelle égale.
+        /// </summary>
+        private const double ScriptWordWeight = 0.4;
+
+        /// <summary>Caractères par mot compté, pour les écritures sans espaces</summary>
+        private const double CharsPerScoredWord = 6.0;
+
+        private static readonly char[] UkrainianLetters = { 'і', 'ї', 'є', 'ґ' };
+        private static readonly char[] RussianLetters = { 'ы', 'э', 'ъ', 'ё' };
 
         private static readonly Dictionary<string, string> CommonWords = new Dictionary<string, string>
         {
@@ -250,59 +284,84 @@ namespace EmbySubtitleMerger.Subtitles
         }
 
         /// <summary>
-        /// Score de chaque langue pour un texte
+        /// Score de chaque langue pour un texte, en « mots courants reconnus ».
+        /// Pour les langues latines, seuls les mots de la liste comptent ; pour les autres écritures,
+        /// tous les mots comptent, d'où la pondération qui garde les deux échelles comparables.
         /// </summary>
         private static Dictionary<string, double> Score(string text)
         {
             var scores = new Dictionary<string, double>();
+            void Add(string language, double amount)
+            {
+                if (amount > 0) scores[language] = scores.TryGetValue(language, out var s) ? s + amount : amount;
+            }
+
             var clean = TagRegex.Replace(text, " ").ToLowerInvariant();
+
+            int cyrillicWords = 0, russianWords = 0, ukrainianWords = 0;
+            int greek = 0, hebrew = 0, arabic = 0, devanagari = 0, hangul = 0;
 
             foreach (Match match in WordRegex.Matches(clean))
             {
-                if (ExclusiveWords.TryGetValue(match.Value, out var language))
-                    scores[language] = scores.TryGetValue(language, out var s) ? s + 1 : 1;
+                var word = match.Value;
+
+                if (ExclusiveWords.TryGetValue(word, out var language))
+                {
+                    Add(language, 1);
+                    continue;
+                }
+
+                var first = word[0];
+                if (first >= 0x0400 && first <= 0x04FF)
+                {
+                    cyrillicWords++;
+                    if (word.IndexOfAny(UkrainianLetters) >= 0) ukrainianWords++;
+                    else if (word.IndexOfAny(RussianLetters) >= 0) russianWords++;
+                }
+                else if (first >= 0x0370 && first <= 0x03FF) greek++;
+                else if (first >= 0x0590 && first <= 0x05FF) hebrew++;
+                else if (first >= 0x0600 && first <= 0x06FF) arabic++;
+                else if (first >= 0x0900 && first <= 0x097F) devanagari++;
+                else if (first >= 0xAC00 && first <= 0xD7AF) hangul++;
             }
 
-            // Écritures non latines : le comptage de caractères suffit
-            int cyrillic = 0, ukrainian = 0, greek = 0, hebrew = 0, arabic = 0, devanagari = 0,
-                thai = 0, hangul = 0, kana = 0, han = 0;
+            // Russe et ukrainien partagent l'alphabet : seules quelques lettres les distinguent.
+            // Les mots sans lettre distinctive sont répartis comme ceux qui en ont.
+            if (ukrainianWords == 0)
+            {
+                Add("ru", cyrillicWords * ScriptWordWeight);
+            }
+            else if (russianWords == 0)
+            {
+                Add("uk", cyrillicWords * ScriptWordWeight);
+            }
+            else
+            {
+                var ukrainianShare = (double)ukrainianWords / (ukrainianWords + russianWords);
+                Add("uk", cyrillicWords * ukrainianShare * ScriptWordWeight);
+                Add("ru", cyrillicWords * (1 - ukrainianShare) * ScriptWordWeight);
+            }
 
+            Add("el", greek * ScriptWordWeight);
+            Add("he", hebrew * ScriptWordWeight);
+            Add("ar", arabic * ScriptWordWeight);
+            Add("hi", devanagari * ScriptWordWeight);
+            Add("ko", hangul * ScriptWordWeight);
+
+            // Écritures sans espaces entre les mots : on compte les caractères
+            int thai = 0, kana = 0, han = 0;
             foreach (var ch in clean)
             {
-                if (ch < 0x0370) continue;
-
-                if (ch >= 0x0400 && ch <= 0x04FF)
-                {
-                    cyrillic++;
-                    if (ch == 'і' || ch == 'ї' || ch == 'є' || ch == 'ґ') ukrainian++;
-                }
-                else if (ch >= 0x0370 && ch <= 0x03FF) greek++;
-                else if (ch >= 0x0590 && ch <= 0x05FF) hebrew++;
-                else if (ch >= 0x0600 && ch <= 0x06FF) arabic++;
-                else if (ch >= 0x0900 && ch <= 0x097F) devanagari++;
-                else if (ch >= 0x0E00 && ch <= 0x0E7F) thai++;
-                else if (ch >= 0xAC00 && ch <= 0xD7AF) hangul++;
+                if (ch >= 0x0E00 && ch <= 0x0E7F) thai++;
                 else if (ch >= 0x3040 && ch <= 0x30FF) kana++;
                 else if (ch >= 0x4E00 && ch <= 0x9FFF) han++;
             }
 
-            // Environ 3 caractères pour l'équivalent d'un mot courant
-            void Add(string language, int chars)
-            {
-                if (chars > 0) scores[language] = chars / 3.0;
-            }
-
-            Add(ukrainian * 100 >= cyrillic && ukrainian > 0 ? "uk" : "ru", cyrillic);
-            Add("el", greek);
-            Add("he", hebrew);
-            Add("ar", arabic);
-            Add("hi", devanagari);
-            Add("th", thai);
-            Add("ko", hangul);
+            Add("th", thai / CharsPerScoredWord);
 
             // Le japonais mélange kana et kanji ; du han sans kana est du chinois
-            if (kana * 20 >= kana + han && kana > 0) Add("ja", kana + han);
-            else Add("zh", han);
+            if (kana * 20 >= kana + han && kana > 0) Add("ja", (kana + han) / CharsPerScoredWord);
+            else Add("zh", han / CharsPerScoredWord);
 
             return scores;
         }
@@ -312,7 +371,7 @@ namespace EmbySubtitleMerger.Subtitles
         /// </summary>
         public static string? DetectSingle(IEnumerable<SubtitleCue> cues)
         {
-            var scores = Score(string.Join("\n", cues.Select(c => c.Text)));
+            var scores = Score(JoinText(cues));
             if (scores.Count == 0) return null;
 
             var best = scores.OrderByDescending(s => s.Value).First();
@@ -322,25 +381,31 @@ namespace EmbySubtitleMerger.Subtitles
         /// <summary>
         /// Les deux langues d'un sous-titre bilingue, et laquelle est affichée en haut.
         /// Top et Bottom sont null si deux langues ne se dégagent pas nettement,
-        /// ou si rien n'indique laquelle est en haut.
+        /// ou si rien n'indique laquelle est en haut ; Reason dit alors pourquoi.
         /// </summary>
-        public static (string? Top, string? Bottom) DetectPair(IReadOnlyList<SubtitleCue> cues)
+        public static (string? Top, string? Bottom, string? Reason) DetectPair(IReadOnlyList<SubtitleCue> cues)
         {
-            var scores = Score(string.Join("\n", cues.Select(c => c.Text)))
+            var scores = Score(JoinText(cues))
                 .OrderByDescending(s => s.Value)
                 .ToList();
 
-            if (scores.Count < 2) return (null, null);
+            var found = scores.Count == 0
+                ? "aucune langue reconnue"
+                : string.Join(", ", scores.Take(3).Select(s => $"{s.Key} {s.Value:0}"));
 
-            var first = scores[0];
-            var second = scores[1];
+            if (scores.Count < 2
+                || scores[1].Value < MinScore
+                || scores[1].Value < scores[0].Value * MinSecondShare)
+            {
+                return (null, null, $"Une seule langue nette dans ce fichier (scores : {found}).");
+            }
 
-            if (second.Value < MinScore || second.Value < first.Value * MinSecondShare)
-                return (null, null);
+            var first = scores[0].Key;
+            var second = scores[1].Key;
 
             // Laquelle est en haut ? Deux indices selon le format du fichier :
             // - une réplique qui mélange les deux langues s'ouvre par celle du haut ;
-            // - une réplique d'une seule langue marquée {\an8} est celle du haut.
+            // - une réplique marquée {\an8} s'ouvre par celle du haut.
             int firstOnTop = 0, secondOnTop = 0;
 
             foreach (var cue in cues)
@@ -352,25 +417,34 @@ namespace EmbySubtitleMerger.Subtitles
 
                 if (lines.Length == 0) continue;
 
-                var opening = Classify(lines[0], first.Key, second.Key);
-                var closing = Classify(lines[lines.Length - 1], first.Key, second.Key);
+                var opening = Classify(lines[0], first, second);
+                var closing = Classify(lines[lines.Length - 1], first, second);
 
                 string? top = null;
                 if (opening != null && closing != null && opening != closing)
                     top = opening;
                 else if (cue.Text.StartsWith(SubtitleMerger.TopPositionTag, StringComparison.Ordinal))
-                    top = opening ?? closing;
+                    top = opening;
 
-                if (top == first.Key) firstOnTop++;
-                else if (top == second.Key) secondOnTop++;
+                if (top == first) firstOnTop++;
+                else if (top == second) secondOnTop++;
             }
 
             // Sans indice net, on ne devine pas : le renommage est à sens unique
-            if (firstOnTop == secondOnTop) return (null, null);
+            if (firstOnTop == secondOnTop)
+            {
+                return (null, null,
+                    $"Deux langues trouvées ({first}, {second}) mais rien n'indique laquelle est en haut (scores : {found}).");
+            }
 
             return secondOnTop > firstOnTop
-                ? (second.Key, first.Key)
-                : (first.Key, second.Key);
+                ? (second, first, null)
+                : (first, second, null);
+        }
+
+        private static string JoinText(IEnumerable<SubtitleCue> cues)
+        {
+            return string.Join("\n", cues.Select(c => c.Text));
         }
 
         /// <summary>
@@ -379,12 +453,27 @@ namespace EmbySubtitleMerger.Subtitles
         private static string? Classify(string line, string languageA, string languageB)
         {
             var scores = Score(line);
+
+            // Entre russe et ukrainien, une ligne sans lettre distinctive ne prouve rien :
+            // Score l'attribuerait au russe par défaut
+            if (IsCyrillicPair(languageA, languageB) && scores.Count == 1)
+            {
+                var clean = TagRegex.Replace(line, " ").ToLowerInvariant();
+                if (clean.IndexOfAny(UkrainianLetters) < 0 && clean.IndexOfAny(RussianLetters) < 0)
+                    return null;
+            }
+
             scores.TryGetValue(languageA, out var a);
             scores.TryGetValue(languageB, out var b);
 
             if (a > b) return languageA;
             if (b > a) return languageB;
             return null;
+        }
+
+        private static bool IsCyrillicPair(string a, string b)
+        {
+            return (a == "ru" && b == "uk") || (a == "uk" && b == "ru");
         }
     }
 }

@@ -1,0 +1,275 @@
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+using System.Threading.Tasks;
+using MediaBrowser.Controller.Library;
+using MediaBrowser.Model.Services;
+
+namespace EmbySubtitleMerger.Subtitles
+{
+    /// <summary>
+    /// Dossiers des médiathèques d'Emby
+    /// </summary>
+    internal static class LibraryFolders
+    {
+        public static List<string> All(ILibraryManager libraryManager)
+        {
+            return libraryManager.GetVirtualFolders()
+                .SelectMany(f => f.Locations ?? Array.Empty<string>())
+                .Where(Directory.Exists)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+        }
+    }
+
+    /// <summary>
+    /// Programmes externes disponibles sur le serveur
+    /// </summary>
+    [Route("/EmbySubtitleMerger/Tools", "GET")]
+    public class GetToolsRequest : IReturn<ToolsResponse>
+    {
+    }
+
+    public class ToolsResponse
+    {
+        public bool FfmpegAvailable { get; set; }
+        public bool FfprobeAvailable { get; set; }
+
+        /// <summary>mkvpropedit (MKVToolNix) : nécessaire seulement pour annoter les pistes des .mkv</summary>
+        public bool MkvPropEditAvailable { get; set; }
+    }
+
+    /// <summary>
+    /// Lance la normalisation des sous-titres (conversion des ASS/SSA en SRT), en tâche de fond.
+    /// </summary>
+    [Route("/EmbySubtitleMerger/Normalize", "POST")]
+    public class NormalizeRequest : IReturn<NormalizeResponse>
+    {
+        /// <summary>true (défaut) = aperçu, rien n'est modifié</summary>
+        public bool DryRun { get; set; } = true;
+
+        /// <summary>Limite le traitement à cette vidéo. Vide = toutes les médiathèques</summary>
+        public string? VideoPath { get; set; }
+
+        /// <summary>Langues à convertir, séparées par des virgules (ex: "en, fr, ru")</summary>
+        public string? Languages { get; set; }
+
+        /// <summary>Refaire les .srt qui existent déjà</summary>
+        public bool Overwrite { get; set; }
+
+        /// <summary>Extraire aussi les pistes texte intégrées en fichiers .srt</summary>
+        public bool ExtractText { get; set; }
+
+        /// <summary>Ajouter la note au nom des .srt externes existants</summary>
+        public bool Annotate { get; set; }
+
+        /// <summary>Écrire la note dans le titre des pistes SRT intégrées aux .mkv (nécessite mkvpropedit)</summary>
+        public bool TagMkvTracks { get; set; }
+
+        /// <summary>Nettoyer au lieu de normaliser : retire les .srt créés par la normalisation</summary>
+        public bool Cleanup { get; set; }
+
+        /// <summary>En nettoyage, retirer aussi les conversions de pistes ASS/SSA (pas seulement les copies de pistes texte)</summary>
+        public bool CleanupConversions { get; set; }
+
+        /// <summary>En nettoyage, retirer aussi les sous-titres bilingues créés par la fusion</summary>
+        public bool CleanupBilingual { get; set; }
+
+        /// <summary>En nettoyage, retirer aussi la note "Normalisé pour Emby" des titres de pistes des .mkv et des .srt d'origine renommés</summary>
+        public bool CleanupNote { get; set; }
+    }
+
+    public class NormalizeResponse
+    {
+        public bool Success { get; set; }
+        public string? JobId { get; set; }
+        public string? Error { get; set; }
+
+        /// <summary>
+        /// true si une autre tâche tournait déjà : JobId est le sien, et la demande n'a pas été lancée
+        /// </summary>
+        public bool AlreadyRunning { get; set; }
+    }
+
+    [Route("/EmbySubtitleMerger/NormalizeStatus", "GET")]
+    public class NormalizeStatusRequest : IReturn<NormalizeStatusResponse>
+    {
+        public string? JobId { get; set; }
+    }
+
+    public class NormalizeStatusResponse
+    {
+        public bool Found { get; set; }
+        public string? Status { get; set; }
+        public bool DryRun { get; set; }
+        public bool Cleanup { get; set; }
+        public int Processed { get; set; }
+        public int Total { get; set; }
+        public int PercentComplete { get; set; }
+        public string? Message { get; set; }
+        public string? Error { get; set; }
+
+        public int Created { get; set; }
+        public int Renamed { get; set; }
+        public int Tagged { get; set; }
+        public int Deleted { get; set; }
+        public int Failures { get; set; }
+        public int ImageTracks { get; set; }
+
+        /// <summary>Détail des opérations, fourni une fois la tâche terminée</summary>
+        public List<NormalizeAction> Actions { get; set; } = new List<NormalizeAction>();
+
+        /// <summary>true si la liste a été coupée (les compteurs restent exacts)</summary>
+        public bool ActionsTruncated { get; set; }
+    }
+
+    [Route("/EmbySubtitleMerger/NormalizeCancel", "POST")]
+    public class NormalizeCancelRequest : IReturn<NormalizeCancelResponse>
+    {
+        public string? JobId { get; set; }
+    }
+
+    public class NormalizeCancelResponse
+    {
+        public bool Success { get; set; }
+    }
+
+    public class NormalizeService : IService
+    {
+        /// <summary>Langues converties quand la requête n'en précise pas, comme dans le script d'origine</summary>
+        private const string DefaultLanguages = "en,fr,ru";
+
+        private readonly ILibraryManager _libraryManager;
+
+        public NormalizeService(ILibraryManager libraryManager)
+        {
+            _libraryManager = libraryManager;
+        }
+
+        public async Task<object> Get(GetToolsRequest request)
+        {
+            var ffmpeg = ExternalTools.RespondsAsync(FfmpegHelper.FfmpegPath);
+            var ffprobe = ExternalTools.RespondsAsync(FfmpegHelper.FfprobePath);
+
+            return new ToolsResponse
+            {
+                FfmpegAvailable = await ffmpeg,
+                FfprobeAvailable = await ffprobe,
+                MkvPropEditAvailable = ExternalTools.FindMkvPropEdit() != null
+            };
+        }
+
+        public async Task<object> Post(NormalizeRequest request)
+        {
+            try
+            {
+                // Deux normalisations en même temps écriraient les mêmes fichiers
+                var running = JobStore<NormalizeJob>.Active();
+                if (running != null)
+                    return new NormalizeResponse { Success = true, JobId = running.Id, AlreadyRunning = true };
+
+                // Le nettoyage ne convertit rien : il lit seulement les vidéos avec ffprobe
+                if (!await ExternalTools.RespondsAsync(FfmpegHelper.FfprobePath)
+                    || (!request.Cleanup && !await ExternalTools.RespondsAsync(FfmpegHelper.FfmpegPath)))
+                {
+                    return Fail("ffmpeg ou ffprobe est introuvable sur le serveur.");
+                }
+
+                var options = new NormalizeOptions
+                {
+                    DryRun = request.DryRun,
+                    Overwrite = request.Overwrite,
+                    ExtractText = request.ExtractText,
+                    Annotate = request.Annotate,
+                    TagMkvTracks = request.TagMkvTracks && !request.Cleanup,
+                    Cleanup = request.Cleanup,
+                    CleanupConversions = request.CleanupConversions,
+                    CleanupBilingual = request.CleanupBilingual,
+                    CleanupNote = request.Cleanup && request.CleanupNote
+                };
+
+                // Les langues ne servent qu'à la normalisation
+                var languageList = string.IsNullOrWhiteSpace(request.Languages) ? DefaultLanguages : request.Languages!;
+                foreach (var code in options.Cleanup
+                    ? Array.Empty<string>()
+                    : languageList.Split(new[] { ',', ';', ' ' }, StringSplitOptions.RemoveEmptyEntries))
+                {
+                    var language = SubtitleNaming.Resolve(code);
+                    if (language == null)
+                        return Fail($"Langue inconnue: {code}");
+                    options.Languages.Add(language.Code);
+                }
+
+                if (!string.IsNullOrWhiteSpace(request.VideoPath))
+                {
+                    if (!File.Exists(request.VideoPath))
+                        return Fail("Fichier vidéo introuvable.");
+                    options.VideoPath = request.VideoPath;
+                }
+
+                // Sans mkvpropedit, le retrait de la note se limite aux noms de fichiers
+                if (options.TagMkvTracks || options.CleanupNote)
+                    options.MkvPropEditPath = ExternalTools.FindMkvPropEdit();
+
+                if (options.TagMkvTracks && options.MkvPropEditPath == null)
+                    return Fail("mkvpropedit (MKVToolNix) n'est pas installé sur le serveur : les pistes des .mkv ne peuvent pas être annotées.");
+
+                var folders = options.VideoPath == null ? LibraryFolders.All(_libraryManager) : new List<string>();
+                var job = JobStore<NormalizeJob>.Add(new NormalizeJob { DryRun = options.DryRun, Cleanup = options.Cleanup });
+
+                Plugin.Log($"[Normalize] Job {job.Id}: {(options.Cleanup ? "nettoyage" : "normalisation")} ({(options.DryRun ? "aperçu" : "exécution")}), "
+                    + $"{(options.VideoPath == null ? folders.Count + " dossier(s)" : Path.GetFileName(options.VideoPath))}, "
+                    + $"langues {string.Join(",", options.Languages)}");
+
+                var libraryManager = _libraryManager;
+                _ = Task.Run(() => SubtitleNormalizer.RunAsync(job, folders, options, () => libraryManager.QueueLibraryScan()));
+
+                return new NormalizeResponse { Success = true, JobId = job.Id };
+            }
+            catch (Exception ex)
+            {
+                Plugin.Log($"[Normalize] ERREUR au démarrage: {ex}");
+                return Fail(ex.Message);
+            }
+        }
+
+        private static NormalizeResponse Fail(string error)
+        {
+            return new NormalizeResponse { Success = false, Error = error };
+        }
+
+        public object Get(NormalizeStatusRequest request)
+        {
+            var job = JobStore<NormalizeJob>.Get(request.JobId);
+            if (job == null)
+                return new NormalizeStatusResponse { Found = false, Error = "Tâche introuvable ou expirée." };
+
+            return new NormalizeStatusResponse
+            {
+                Found = true,
+                Status = job.Status.ToString(),
+                DryRun = job.DryRun,
+                Cleanup = job.Cleanup,
+                Processed = job.Processed,
+                Total = job.Total,
+                PercentComplete = job.PercentComplete,
+                Message = job.Message,
+                Error = job.Error,
+                Created = job.Created,
+                Renamed = job.Renamed,
+                Tagged = job.Tagged,
+                Deleted = job.Deleted,
+                Failures = job.Failures,
+                ImageTracks = job.ImageTracks,
+                Actions = job.IsActive ? new List<NormalizeAction>() : job.SnapshotActions(),
+                ActionsTruncated = job.ActionsTruncated
+            };
+        }
+
+        public object Post(NormalizeCancelRequest request)
+        {
+            return new NormalizeCancelResponse { Success = JobStore<NormalizeJob>.Cancel(request.JobId) };
+        }
+    }
+}

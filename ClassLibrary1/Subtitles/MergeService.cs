@@ -67,6 +67,30 @@ namespace EmbySubtitleMerger.Subtitles
 
         /// <summary>Disposition: topbottom (defaut) ou stacked (tout en bas)</summary>
         public string? Layout { get; set; }
+
+        /// <summary>
+        /// true : la fusion tourne en tâche de fond et la réponse ne porte que JobId,
+        /// à suivre avec /EmbySubtitleMerger/MergeStatus. L'extraction d'une piste d'un gros film
+        /// dure plusieurs minutes : une requête aussi longue est coupée par un proxy ou le navigateur.
+        /// </summary>
+        public bool Background { get; set; } = false;
+    }
+
+    /// <summary>
+    /// Requête de suivi d'une fusion lancée en tâche de fond
+    /// </summary>
+    [Route("/EmbySubtitleMerger/MergeStatus", "GET")]
+    public class GetMergeStatusRequest : IReturn<MergeSubtitlesResponse>
+    {
+        public string? JobId { get; set; }
+    }
+
+    /// <summary>
+    /// Fusion en tâche de fond. Message porte l'étape en cours.
+    /// </summary>
+    public class MergeJob : BackgroundJob
+    {
+        public MergeSubtitlesResponse? Result { get; set; }
     }
     
     /// <summary>
@@ -79,6 +103,15 @@ namespace EmbySubtitleMerger.Subtitles
         public string? OutputPath { get; set; }
         public int? CueCount { get; set; }
         public string? Error { get; set; }
+
+        /// <summary>Tâche de fond : identifiant à passer à MergeStatus</summary>
+        public string? JobId { get; set; }
+
+        /// <summary>Tâche de fond : true tant que la fusion n'est pas terminée</summary>
+        public bool Running { get; set; }
+
+        /// <summary>Tâche de fond : étape en cours</summary>
+        public string? Step { get; set; }
     }
     
     /// <summary>
@@ -130,8 +163,9 @@ namespace EmbySubtitleMerger.Subtitles
         /// </summary>
         public async Task<object> Get(GetStatusRequest request)
         {
-            var ffmpegAvailable = await FfmpegHelper.IsAvailableAsync();
-            var ffmpegVersion = ffmpegAvailable ? await FfmpegHelper.GetVersionAsync() : null;
+            var version = await ExternalTools.RunAsync(FfmpegHelper.FfmpegPath, new[] { "-version" }, 15);
+            var ffmpegAvailable = version.Success;
+            var ffmpegVersion = ffmpegAvailable ? version.Output.Split('\n')[0].Trim() : null;
 
             // Vérifier l'API cloud
             bool cloudApiAvailable = false;
@@ -146,7 +180,7 @@ namespace EmbySubtitleMerger.Subtitles
             {
                 FfmpegAvailable = ffmpegAvailable,
                 FfmpegVersion = ffmpegVersion,
-                PluginVersion = "8.9.0",
+                PluginVersion = typeof(Plugin).Assembly.GetName().Version?.ToString(3),
                 CloudApiAvailable = cloudApiAvailable,
                 CloudApiUrl = DoubleSubApiClient.DefaultApiUrl
             };
@@ -240,41 +274,61 @@ namespace EmbySubtitleMerger.Subtitles
         /// </summary>
         public async Task<object> Post(MergeSubtitlesRequest request)
         {
+            if (!request.Background)
+                return await RunMergeAsync(request, null);
+
+            var job = JobStore<MergeJob>.Add(new MergeJob { Status = JobStatus.Running, Message = "Démarrage" });
+
+            _ = Task.Run(async () =>
+            {
+                var result = await RunMergeAsync(request, step => job.Message = step);
+                job.Result = result;
+                job.FinishedAt = DateTime.UtcNow;
+                job.Status = result.Success ? JobStatus.Completed : JobStatus.Failed;
+            });
+
+            return new MergeSubtitlesResponse { Success = true, Running = true, JobId = job.Id, Step = job.Message };
+        }
+
+        /// <summary>
+        /// Avancement ou résultat d'une fusion lancée en tâche de fond
+        /// </summary>
+        public object Get(GetMergeStatusRequest request)
+        {
+            var job = JobStore<MergeJob>.Get(request.JobId);
+            if (job == null)
+                return Fail("Fusion introuvable : le serveur a peut-être redémarré. Relancez la fusion.");
+
+            if (job.Result == null)
+                return new MergeSubtitlesResponse { Success = true, Running = true, JobId = job.Id, Step = job.Message };
+
+            return job.Result;
+        }
+
+        private static async Task<MergeSubtitlesResponse> RunMergeAsync(MergeSubtitlesRequest request, Action<string>? progress)
+        {
             try
             {
                 if (string.IsNullOrEmpty(request.VideoPath))
-                {
-                    return new MergeSubtitlesResponse
-                    {
-                        Success = false,
-                        Error = "VideoPath est requis"
-                    };
-                }
+                    return Fail("VideoPath est requis");
 
                 if (!File.Exists(request.VideoPath))
-                {
-                    return new MergeSubtitlesResponse
-                    {
-                        Success = false,
-                        Error = $"Fichier vidéo non trouvé: {request.VideoPath}"
-                    };
-                }
+                    return Fail($"Fichier vidéo non trouvé: {request.VideoPath}");
 
-                var source1 = await SubtitleSource.AcquireAsync(
-                    request.VideoPath, request.Primary1IsExternal, request.Primary1Path, request.PrimaryIndex, "sous-titre 1");
+                progress?.Invoke("Etape 1/2 : lecture des deux sous-titres");
+                var (source1, source2) = await SubtitleSource.AcquirePairAsync(
+                    request.VideoPath,
+                    request.Primary1IsExternal, request.Primary1Path, request.PrimaryIndex,
+                    request.Primary2IsExternal, request.Primary2Path, request.SecondaryIndex);
                 if (!source1.Success)
                     return Fail(source1.Error!);
-
-                var source2 = await SubtitleSource.AcquireAsync(
-                    request.VideoPath, request.Primary2IsExternal, request.Primary2Path, request.SecondaryIndex, "sous-titre 2");
                 if (!source2.Success)
-                {
-                    source1.Cleanup();
                     return Fail(source2.Error!);
-                }
 
                 try
                 {
+                    progress?.Invoke("Etape 2/2 : fusion");
+
                     // Le nom du fichier porte les deux langues : c'est ce qu'Emby affiche dans le lecteur
                     var language1 = SubtitleNaming.ResolveOrDetect(request.Language1, source1.Path);
                     var language2 = SubtitleNaming.ResolveOrDetect(request.Language2, source2.Path);

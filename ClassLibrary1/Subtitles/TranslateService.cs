@@ -113,7 +113,7 @@ namespace EmbySubtitleMerger.Subtitles
     /// </summary>
     public class TranslateService : IService
     {
-        public async Task<object> Post(TranslateSubtitleRequest request)
+        public object Post(TranslateSubtitleRequest request)
         {
             try
             {
@@ -139,17 +139,9 @@ namespace EmbySubtitleMerger.Subtitles
                 if (sourceLanguage != null && sourceLanguage.Code == target.Code)
                     return Fail($"La piste source est déjà en {target.NativeName}.");
 
-                var source = await SubtitleSource.AcquireAsync(
-                    request.VideoPath, request.SourceIsExternal, request.SourcePath, request.SourceIndex, "sous-titre source");
-                if (!source.Success)
-                    return Fail(source.Error!);
-
                 var outputPath = SubtitleNaming.SinglePath(request.VideoPath, target);
-                if (SubtitleNaming.SamePath(outputPath, source.Path))
-                {
-                    source.Cleanup();
+                if (request.SourceIsExternal && SubtitleNaming.SamePath(outputPath, request.SourcePath ?? string.Empty))
                     return Fail("La traduction écraserait le sous-titre source.");
-                }
 
                 var batchSize = Math.Clamp(
                     request.BatchSize ?? config?.TranslationBatchSize ?? SubtitleTranslator.DefaultBatchSize, 1, 100);
@@ -157,18 +149,50 @@ namespace EmbySubtitleMerger.Subtitles
 
                 // Le job ne garde que ce dont il a besoin, pas la requête entière
                 var videoPath = request.VideoPath;
+                var sourceIsExternal = request.SourceIsExternal;
+                var sourcePath = request.SourcePath;
+                var sourceIndex = request.SourceIndex;
                 var sourceCode = request.SourceLanguage;
                 var mergeOptions = request.ThenMerge
                     ? MergeOptions.From(request.MergeMode, request.ToleranceMs, request.Color1, request.Color2, request.Layout)
                     : null;
 
-                var job = TranslationJobStore.Create();
+                var job = JobStore<TranslationJob>.Add(new TranslationJob());
 
                 Plugin.Log($"[Translate] Job {job.Id}: {Path.GetFileName(videoPath)} -> {target.Code}, lots de {batchSize}");
 
-                // Exécution en tâche de fond, suivi via /TranslateStatus
+                // Exécution en tâche de fond, suivi via /TranslateStatus. L'extraction de la piste en fait
+                // partie : sur un gros film elle dure plusieurs minutes, trop pour la requête de lancement.
                 _ = Task.Run(async () =>
                 {
+                    job.Status = JobStatus.Running;
+                    job.Message = "Lecture du sous-titre source…";
+
+                    SubtitleSource source;
+                    try
+                    {
+                        source = await SubtitleSource.AcquireAsync(
+                            videoPath, sourceIsExternal, sourcePath, sourceIndex, "sous-titre source", job.Cancellation.Token);
+                    }
+                    catch (Exception ex)
+                    {
+                        var cancelled = ex is OperationCanceledException;
+                        job.Error = cancelled ? null : ex.Message;
+                        job.Message = cancelled ? "Traduction annulée." : "Échec de la traduction.";
+                        job.FinishedAt = DateTime.UtcNow;
+                        job.Status = cancelled ? JobStatus.Cancelled : JobStatus.Failed;
+                        return;
+                    }
+
+                    if (!source.Success)
+                    {
+                        job.Error = source.Error;
+                        job.Message = "Échec de la traduction.";
+                        job.FinishedAt = DateTime.UtcNow;
+                        job.Status = JobStatus.Failed;
+                        return;
+                    }
+
                     try
                     {
                         await SubtitleTranslator.RunJobAsync(
@@ -247,7 +271,7 @@ namespace EmbySubtitleMerger.Subtitles
 
         public object Get(TranslateStatusRequest request)
         {
-            var job = TranslationJobStore.Get(request.JobId);
+            var job = JobStore<TranslationJob>.Get(request.JobId);
 
             if (job == null)
             {
@@ -277,7 +301,7 @@ namespace EmbySubtitleMerger.Subtitles
 
         public object Post(TranslateCancelRequest request)
         {
-            var cancelled = TranslationJobStore.Cancel(request.JobId);
+            var cancelled = JobStore<TranslationJob>.Cancel(request.JobId);
             return new TranslateCancelResponse
             {
                 Success = cancelled,
