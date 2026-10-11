@@ -58,6 +58,15 @@ namespace EmbySubtitleMerger.Subtitles
 
         /// <summary>Cle API DoubleSub.io (requise pour le mode cloud)</summary>
         public string? DoubleSubApiKey { get; set; }
+
+        /// <summary>Code langue du sous-titre 1 (ex: fre). Vide = détection sur le contenu</summary>
+        public string? Language1 { get; set; }
+
+        /// <summary>Code langue du sous-titre 2 (ex: eng). Vide = détection sur le contenu</summary>
+        public string? Language2 { get; set; }
+
+        /// <summary>Disposition: topbottom (defaut) ou stacked (tout en bas)</summary>
+        public string? Layout { get; set; }
     }
     
     /// <summary>
@@ -251,320 +260,145 @@ namespace EmbySubtitleMerger.Subtitles
                     };
                 }
 
-                // Vérifier FFmpeg
-                if (!await FfmpegHelper.IsAvailableAsync())
+                var source1 = await SubtitleSource.AcquireAsync(
+                    request.VideoPath, request.Primary1IsExternal, request.Primary1Path, request.PrimaryIndex, "sous-titre 1");
+                if (!source1.Success)
+                    return Fail(source1.Error!);
+
+                var source2 = await SubtitleSource.AcquireAsync(
+                    request.VideoPath, request.Primary2IsExternal, request.Primary2Path, request.SecondaryIndex, "sous-titre 2");
+                if (!source2.Success)
                 {
-                    return new MergeSubtitlesResponse
-                    {
-                        Success = false,
-                        Error = "FFmpeg n'est pas disponible. Installez FFmpeg et assurez-vous qu'il est dans le PATH."
-                    };
+                    source1.Cleanup();
+                    return Fail(source2.Error!);
                 }
 
-                var videoDir = Path.GetDirectoryName(request.VideoPath) ?? ".";
-                var videoName = Path.GetFileNameWithoutExtension(request.VideoPath);
-                var tempDir = Path.Combine(Path.GetTempPath(), "EmbySubtitleMerger");
-                Directory.CreateDirectory(tempDir);
-
-                // Obtenir le premier sous-titre (externe ou embarqué)
-                string primary1Path;
-                if (request.Primary1IsExternal && !string.IsNullOrEmpty(request.Primary1Path))
+                try
                 {
-                    // Sous-titre externe : utiliser directement le fichier
-                    primary1Path = request.Primary1Path;
-                    if (!File.Exists(primary1Path))
+                    // Le nom du fichier porte les deux langues : c'est ce qu'Emby affiche dans le lecteur
+                    var language1 = SubtitleNaming.ResolveOrDetect(request.Language1, source1.Path);
+                    var language2 = SubtitleNaming.ResolveOrDetect(request.Language2, source2.Path);
+                    var outputPath = SubtitleNaming.DualPath(request.VideoPath, language1, language2);
+
+                    if (SubtitleNaming.SamePath(outputPath, source1.Path) || SubtitleNaming.SamePath(outputPath, source2.Path))
+                        return Fail("Le fichier produit écraserait l'un des deux sous-titres choisis. Choisissez deux autres pistes.");
+
+                    if (request.UseCloudApi)
                     {
-                        return new MergeSubtitlesResponse
-                        {
-                            Success = false,
-                            Error = $"Fichier sous-titre 1 non trouvé: {primary1Path}"
-                        };
-                    }
-                }
-                else
-                {
-                    // Sous-titre embarqué : extraire avec FFmpeg
-                    primary1Path = Path.Combine(tempDir, $"{videoName}.sub1.srt");
-                    var result1 = await FfmpegHelper.ExtractSubtitleByAbsoluteIndexAsync(
-                        request.VideoPath,
-                        request.PrimaryIndex,
-                        primary1Path);
+                        if (string.IsNullOrEmpty(request.DoubleSubApiKey))
+                            return Fail("Cle API DoubleSub.io requise pour le mode cloud. Obtenez-en une sur doublesub.io/api/v1/docs");
 
-                    if (!result1.Success)
-                    {
-                        return new MergeSubtitlesResponse
-                        {
-                            Success = false,
-                            Error = $"Erreur extraction sous-titre 1: {result1.Error}"
-                        };
-                    }
-                }
-
-                // Obtenir le second sous-titre (externe ou embarqué)
-                string secondary2Path;
-                if (request.Primary2IsExternal && !string.IsNullOrEmpty(request.Primary2Path))
-                {
-                    // Sous-titre externe : utiliser directement le fichier
-                    secondary2Path = request.Primary2Path;
-                    if (!File.Exists(secondary2Path))
-                    {
-                        return new MergeSubtitlesResponse
-                        {
-                            Success = false,
-                            Error = $"Fichier sous-titre 2 non trouvé: {secondary2Path}"
-                        };
-                    }
-                }
-                else
-                {
-                    // Sous-titre embarqué : extraire avec FFmpeg
-                    secondary2Path = Path.Combine(tempDir, $"{videoName}.sub2.srt");
-                    var result2 = await FfmpegHelper.ExtractSubtitleByAbsoluteIndexAsync(
-                        request.VideoPath,
-                        request.SecondaryIndex,
-                        secondary2Path);
-
-                    if (!result2.Success)
-                    {
-                        return new MergeSubtitlesResponse
-                        {
-                            Success = false,
-                            Error = $"Erreur extraction sous-titre 2: {result2.Error}"
-                        };
-                    }
-                }
-
-                var outputPath = Path.Combine(videoDir, $"{videoName}.dual.srt");
-
-                // Déterminer quels fichiers sont temporaires (à nettoyer après)
-                bool sub1IsTemp = !request.Primary1IsExternal;
-                bool sub2IsTemp = !request.Primary2IsExternal;
-
-                // Choisir entre API cloud ou fusion locale
-                if (request.UseCloudApi)
-                {
-                    // Verifier que la cle API est fournie
-                    if (string.IsNullOrEmpty(request.DoubleSubApiKey))
-                    {
-                        return new MergeSubtitlesResponse
-                        {
-                            Success = false,
-                            Error = "Cle API DoubleSub.io requise pour le mode cloud. Obtenez-en une sur doublesub.io/api/v1/docs"
-                        };
+                        return await MergeViaCloudApiAsync(source1.Path, source2.Path, outputPath, request);
                     }
 
-                    // ========== FUSION VIA API DOUBLESUB.IO ==========
-                    return await MergeViaCloudApiAsync(
-                        primary1Path,
-                        secondary2Path,
-                        outputPath,
-                        request.Mode ?? "all",
-                        request.ToleranceMs ?? 700,
-                        request.Color1,
-                        request.Color2,
-                        request.DoubleSubApiKey,
-                        sub1IsTemp,
-                        sub2IsTemp);
+                    return MergeLocally(source1.Path, source2.Path, outputPath, request);
                 }
-                else
+                finally
                 {
-                    // ========== FUSION LOCALE ==========
-                    return await MergeLocallyAsync(
-                        primary1Path,
-                        secondary2Path,
-                        outputPath,
-                        request.Mode,
-                        request.ToleranceMs ?? 700,
-                        request.Color1,
-                        request.Color2,
-                        request.Offset1Ms,
-                        request.Offset2Ms,
-                        sub1IsTemp,
-                        sub2IsTemp);
+                    // Seuls les fichiers extraits par le plugin sont supprimés, jamais les externes
+                    source1.Cleanup();
+                    source2.Cleanup();
                 }
             }
             catch (Exception ex)
             {
-                return new MergeSubtitlesResponse
-                {
-                    Success = false,
-                    Error = ex.Message
-                };
+                return Fail(ex.Message);
             }
         }
 
+        private static MergeSubtitlesResponse Fail(string error)
+        {
+            return new MergeSubtitlesResponse { Success = false, Error = error };
+        }
+
         /// <summary>
-        /// Fusionne via l'API DoubleSub.io (cloud)
+        /// Fusionne via l'API DoubleSub.io (cloud).
+        /// Le service décide lui-même de la disposition : Layout et les décalages ne s'appliquent pas ici.
         /// </summary>
-        private async Task<MergeSubtitlesResponse> MergeViaCloudApiAsync(
+        private static async Task<MergeSubtitlesResponse> MergeViaCloudApiAsync(
             string srt1Path,
             string srt2Path,
             string outputPath,
-            string mode,
-            int toleranceMs,
-            string? color1,
-            string? color2,
-            string apiKey,
-            bool srt1IsTemp = true,
-            bool srt2IsTemp = true)
+            MergeSubtitlesRequest request)
         {
             try
             {
-                using var apiClient = new DoubleSubApiClient(apiKey);
+                using var apiClient = new DoubleSubApiClient(request.DoubleSubApiKey);
 
-                // Vérifier que l'API est disponible
                 if (!await apiClient.IsAvailableAsync())
-                {
-                    return new MergeSubtitlesResponse
-                    {
-                        Success = false,
-                        Error = "L'API DoubleSub.io n'est pas accessible. Vérifiez votre connexion internet ou utilisez la fusion locale."
-                    };
-                }
+                    return Fail("L'API DoubleSub.io n'est pas accessible. Vérifiez votre connexion internet ou utilisez la fusion locale.");
 
-                // Appeler l'API
                 var result = await apiClient.MergeAsync(
                     srt1Path,
                     srt2Path,
                     outputPath,
-                    mode,
-                    toleranceMs,
-                    color1,
-                    color2);
+                    request.Mode ?? "all",
+                    request.ToleranceMs ?? new MergeOptions().ToleranceMs,
+                    request.Color1,
+                    request.Color2);
 
-                // Nettoyer uniquement les fichiers temporaires (pas les externes!)
-                if (srt1IsTemp) CleanupTempFiles(srt1Path);
-                if (srt2IsTemp) CleanupTempFiles(srt2Path);
+                if (!result.Success)
+                    return Fail($"Erreur API cloud: {result.Error}");
 
-                if (result.Success)
+                return new MergeSubtitlesResponse
                 {
-                    return new MergeSubtitlesResponse
-                    {
-                        Success = true,
-                        Message = $"Fusion cloud réussie! {result.CueCount} sous-titres créés via DoubleSub.io",
-                        OutputPath = result.OutputPath,
-                        CueCount = result.CueCount
-                    };
-                }
-                else
-                {
-                    return new MergeSubtitlesResponse
-                    {
-                        Success = false,
-                        Error = $"Erreur API cloud: {result.Error}"
-                    };
-                }
+                    Success = true,
+                    Message = $"Fusion cloud réussie! {result.CueCount} sous-titres créés via DoubleSub.io",
+                    OutputPath = result.OutputPath,
+                    CueCount = result.CueCount
+                };
             }
             catch (Exception ex)
             {
-                return new MergeSubtitlesResponse
-                {
-                    Success = false,
-                    Error = $"Erreur lors de l'appel API cloud: {ex.Message}"
-                };
+                return Fail($"Erreur lors de l'appel API cloud: {ex.Message}");
             }
         }
 
         /// <summary>
         /// Fusionne localement (sans API)
         /// </summary>
-        private Task<MergeSubtitlesResponse> MergeLocallyAsync(
+        private static MergeSubtitlesResponse MergeLocally(
             string srt1Path,
             string srt2Path,
             string outputPath,
-            string? mode,
-            int toleranceMs,
-            string? color1,
-            string? color2,
-            int offset1Ms = 0,
-            int offset2Ms = 0,
-            bool srt1IsTemp = true,
-            bool srt2IsTemp = true)
+            MergeSubtitlesRequest request)
         {
             try
             {
-                // Parser les sous-titres
                 var primary = SrtParser.ParseFile(srt1Path);
                 var secondary = SrtParser.ParseFile(srt2Path);
 
-                // Appliquer les offsets si necessaire
-                if (offset1Ms != 0)
-                {
-                    foreach (var cue in primary)
-                    {
-                        cue.StartTime = cue.StartTime.Add(TimeSpan.FromMilliseconds(offset1Ms));
-                        cue.EndTime = cue.EndTime.Add(TimeSpan.FromMilliseconds(offset1Ms));
-                    }
-                }
-                if (offset2Ms != 0)
-                {
-                    foreach (var cue in secondary)
-                    {
-                        cue.StartTime = cue.StartTime.Add(TimeSpan.FromMilliseconds(offset2Ms));
-                        cue.EndTime = cue.EndTime.Add(TimeSpan.FromMilliseconds(offset2Ms));
-                    }
-                }
+                ApplyOffset(primary, request.Offset1Ms);
+                ApplyOffset(secondary, request.Offset2Ms);
 
-                // Options de fusion
-                var options = new MergeOptions
-                {
-                    ToleranceMs = toleranceMs,
-                    UsePositioning = true,
-                    PrimaryColor = color1,
-                    SecondaryColor = color2
-                };
-
-                if (!string.IsNullOrEmpty(mode))
-                {
-                    options.Mode = mode.ToLower() switch
-                    {
-                        "overlapping" => MergeMode.OverlappingOnly,
-                        "primary" => MergeMode.PrimaryPriority,
-                        _ => MergeMode.AllCues
-                    };
-                }
-
-                // Fusionner
+                var options = MergeOptions.From(request.Mode, request.ToleranceMs, request.Color1, request.Color2, request.Layout);
                 var merged = SubtitleMerger.Merge(primary, secondary, options);
 
-                // Écrire le résultat
                 SrtParser.WriteFile(outputPath, merged);
 
-                // Nettoyer uniquement les fichiers temporaires (pas les externes!)
-                if (srt1IsTemp) CleanupTempFiles(srt1Path);
-                if (srt2IsTemp) CleanupTempFiles(srt2Path);
-
-                return Task.FromResult(new MergeSubtitlesResponse
+                return new MergeSubtitlesResponse
                 {
                     Success = true,
                     Message = $"Fusion locale réussie! {merged.Count} sous-titres créés.",
                     OutputPath = outputPath,
                     CueCount = merged.Count
-                });
+                };
             }
             catch (Exception ex)
             {
-                return Task.FromResult(new MergeSubtitlesResponse
-                {
-                    Success = false,
-                    Error = $"Erreur fusion locale: {ex.Message}"
-                });
+                return Fail($"Erreur fusion locale: {ex.Message}");
             }
         }
 
-        /// <summary>
-        /// Nettoie les fichiers temporaires
-        /// </summary>
-        private void CleanupTempFiles(params string[] paths)
+        private static void ApplyOffset(List<SubtitleCue> cues, int offsetMs)
         {
-            foreach (var path in paths)
+            if (offsetMs == 0) return;
+
+            var offset = TimeSpan.FromMilliseconds(offsetMs);
+            foreach (var cue in cues)
             {
-                try
-                {
-                    if (File.Exists(path))
-                        File.Delete(path);
-                }
-                catch { }
+                cue.StartTime = cue.StartTime.Add(offset);
+                cue.EndTime = cue.EndTime.Add(offset);
             }
         }
         

@@ -42,7 +42,9 @@ namespace EmbySubtitleMerger.Subtitles
         /// </summary>
         public static List<SubtitleCue> ParseFile(string filePath)
         {
-            var content = File.ReadAllText(filePath, DetectEncoding(filePath));
+            // Une seule lecture du fichier : l'encodage est détecté sur les octets déjà chargés
+            var bytes = File.ReadAllBytes(filePath);
+            var content = DetectEncoding(bytes).GetString(bytes);
             return Parse(content);
         }
         
@@ -145,7 +147,11 @@ namespace EmbySubtitleMerger.Subtitles
         /// </summary>
         public static Encoding DetectEncoding(string filePath)
         {
-            var bytes = File.ReadAllBytes(filePath);
+            return DetectEncoding(File.ReadAllBytes(filePath));
+        }
+
+        private static Encoding DetectEncoding(byte[] bytes)
+        {
             
             // UTF-8 BOM
             if (bytes.Length >= 3 && bytes[0] == 0xEF && bytes[1] == 0xBB && bytes[2] == 0xBF)

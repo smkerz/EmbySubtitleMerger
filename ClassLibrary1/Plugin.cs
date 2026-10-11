@@ -72,5 +72,17 @@ namespace EmbySubtitleMerger
         public string DefaultLanguage1 { get; set; } = "en";
         public string DefaultLanguage2 { get; set; } = "fr";
         public string OutputFormat { get; set; } = "srt";
+
+        /// <summary>Clé API Anthropic utilisée pour la traduction quand la page n'en fournit pas</summary>
+        public string AnthropicApiKey { get; set; } = string.Empty;
+
+        /// <summary>Langue cible utilisée quand la requête n'en précise pas</summary>
+        public string DefaultTargetLanguage { get; set; } = "fr";
+
+        /// <summary>Modèle Claude utilisé pour la traduction</summary>
+        public string TranslationModel { get; set; } = Subtitles.ClaudeTranslationClient.DefaultModel;
+
+        /// <summary>Nombre de répliques envoyées par appel API</summary>
+        public int TranslationBatchSize { get; set; } = Subtitles.SubtitleTranslator.DefaultBatchSize;
     }
 }

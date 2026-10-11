@@ -9,9 +9,64 @@ define([], function () {
     var currentMovie = null;
     var currentMediaSource = null; // Version selectionnee (MediaSource)
     var useCloudApi = false;
+    var currentTranslationJob = null;    // Id du job de traduction en cours
+    var currentTranslationItemId = null; // Element Emby que ce job traduit
+    var translationPollTimer = null;     // Timer de polling du statut
+    var translationPollFailures = 0;     // Echecs consecutifs du polling
+    var pageVisible = false;             // La page du plugin est affichee
+
+    // Sections qui dependent du film et de la version selectionnes
+    var WORK_SECTIONS = ['#subtitlesSection', '#optionsSection', '#mergeModeSection', '#mergeSection', '#translateSection'];
 
     function getApiClient() {
         return window.ApiClient;
+    }
+
+    // URL d'un endpoint du plugin, authentifiee avec le jeton de la session Emby
+    function pluginUrl(name, query) {
+        var apiClient = getApiClient();
+        var url = apiClient.serverAddress() + '/EmbySubtitleMerger/' + name + '?api_key=' + apiClient.accessToken();
+        return query ? url + '&' + query : url;
+    }
+
+    function getPlugin(name, query) {
+        return fetch(pluginUrl(name, query)).then(function (r) { return r.json(); });
+    }
+
+    function postPlugin(name, body) {
+        return fetch(pluginUrl(name), {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body)
+        }).then(function (r) { return r.json(); });
+    }
+
+    function escapeHtml(text) {
+        return String(text == null ? '' : text)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;');
+    }
+
+    // kind: ok, error, warning ou info. html doit deja etre echappe.
+    function statusBox(kind, html) {
+        return '<div class="status-box status-' + kind + '">' + html + '</div>';
+    }
+
+    // Chemin de la version selectionnee si le film en a plusieurs, sinon celui du film
+    function currentVideoPath() {
+        return (currentMediaSource && currentMediaSource.Path) ? currentMediaSource.Path : currentMovie.Path;
+    }
+
+    function readTolerance(view) {
+        return parseInt(view.querySelector('#tolerance').value) || 700;
+    }
+
+    function setWorkSectionsVisible(view, visible) {
+        WORK_SECTIONS.forEach(function (selector) {
+            var section = view.querySelector(selector);
+            if (section) section.style.display = visible ? 'block' : 'none';
+        });
     }
 
     function log(view, msg) {
@@ -178,18 +233,9 @@ define([], function () {
 
     function onMovieChange(view) {
         var idx = parseInt(view.querySelector('#moviesSelect').value);
-        var versionSection = view.querySelector('#versionSection');
-        var subSection = view.querySelector('#subtitlesSection');
-        var optionsSection = view.querySelector('#optionsSection');
-        var mergeModeSection = view.querySelector('#mergeModeSection');
-        var mergeSection = view.querySelector('#mergeSection');
-
         if (isNaN(idx) || idx < 0 || idx >= filteredMovies.length) {
-            versionSection.style.display = 'none';
-            subSection.style.display = 'none';
-            optionsSection.style.display = 'none';
-            mergeModeSection.style.display = 'none';
-            mergeSection.style.display = 'none';
+            view.querySelector('#versionSection').style.display = 'none';
+            setWorkSectionsVisible(view, false);
             return;
         }
 
@@ -224,10 +270,6 @@ define([], function () {
 
     function showMediaSources(view) {
         var versionSection = view.querySelector('#versionSection');
-        var subSection = view.querySelector('#subtitlesSection');
-        var optionsSection = view.querySelector('#optionsSection');
-        var mergeModeSection = view.querySelector('#mergeModeSection');
-        var mergeSection = view.querySelector('#mergeSection');
 
         // Verifier si plusieurs versions existent
         var mediaSources = currentMovie.MediaSources || [];
@@ -256,10 +298,7 @@ define([], function () {
             };
 
             versionSection.style.display = 'block';
-            subSection.style.display = 'none';
-            optionsSection.style.display = 'none';
-            mergeModeSection.style.display = 'none';
-            mergeSection.style.display = 'none';
+            setWorkSectionsVisible(view, false);
         } else {
             // Une seule version ou pas de MediaSources - charger directement
             versionSection.style.display = 'none';
@@ -276,10 +315,7 @@ define([], function () {
         var mediaSources = currentMovie.MediaSources || [];
 
         if (isNaN(idx) || idx < 0 || idx >= mediaSources.length) {
-            view.querySelector('#subtitlesSection').style.display = 'none';
-            view.querySelector('#optionsSection').style.display = 'none';
-            view.querySelector('#mergeModeSection').style.display = 'none';
-            view.querySelector('#mergeSection').style.display = 'none';
+            setWorkSectionsVisible(view, false);
             return;
         }
 
@@ -289,11 +325,6 @@ define([], function () {
     }
 
     function loadSubtitlesForCurrentSource(view) {
-        var subSection = view.querySelector('#subtitlesSection');
-        var optionsSection = view.querySelector('#optionsSection');
-        var mergeModeSection = view.querySelector('#mergeModeSection');
-        var mergeSection = view.querySelector('#mergeSection');
-
         // Utiliser les MediaStreams de la MediaSource si disponible, sinon ceux du film
         var streams = [];
         if (currentMediaSource && currentMediaSource.MediaStreams) {
@@ -319,7 +350,7 @@ define([], function () {
                     var fileName = subPath.split(/[\\/]/).pop();
                     if (fileName) label += ' - ' + fileName;
                 }
-                subs.push({ index: s.Index, label: label, isText: isText, isExternal: isExternal, path: subPath });
+                subs.push({ index: s.Index, label: label, isText: isText, isExternal: isExternal, path: subPath, lang: s.Language || '' });
             }
         }
 
@@ -328,32 +359,27 @@ define([], function () {
         s1.innerHTML = '<option value="">-- Choisir --</option>';
         s2.innerHTML = '<option value="">-- Choisir --</option>';
 
-        for (var j = 0; j < subs.length; j++) {
-            var sub = subs[j];
-            var o1 = document.createElement('option');
-            o1.value = sub.index;
-            o1.textContent = sub.label;
-            o1.dataset.isText = sub.isText;
-            o1.dataset.isExternal = sub.isExternal;
-            o1.dataset.path = sub.path;
-            s1.appendChild(o1);
+        function makeOption(sub) {
+            var option = document.createElement('option');
+            option.value = sub.index;
+            option.textContent = sub.label;
+            option.dataset.isText = sub.isText;
+            option.dataset.isExternal = sub.isExternal;
+            option.dataset.path = sub.path;
+            option.dataset.lang = sub.lang;
+            return option;
+        }
 
-            var o2 = document.createElement('option');
-            o2.value = sub.index;
-            o2.textContent = sub.label;
-            o2.dataset.isText = sub.isText;
-            o2.dataset.isExternal = sub.isExternal;
-            o2.dataset.path = sub.path;
-            s2.appendChild(o2);
+        for (var j = 0; j < subs.length; j++) {
+            s1.appendChild(makeOption(subs[j]));
+            s2.appendChild(makeOption(subs[j]));
         }
 
         s1.onchange = function() { checkImageWarning(view); };
         s2.onchange = function() { checkImageWarning(view); };
 
-        subSection.style.display = 'block';
-        optionsSection.style.display = 'block';
-        mergeModeSection.style.display = 'block';
-        mergeSection.style.display = 'block';
+        setWorkSectionsVisible(view, true);
+
         success(view, subs.length + ' sous-titres trouves');
 
         checkCloudStatus(view);
@@ -400,7 +426,7 @@ define([], function () {
         var baseUrl = apiClient.serverAddress();
         var apiKey = apiClient.accessToken();
 
-        // Appeler l'API Emby avec FullRefresh pour forcer la detection du nouveau fichier .dual.srt
+        // Appeler l'API Emby avec FullRefresh pour forcer la detection du nouveau sous-titre bilingue
         var refreshUrl = baseUrl + '/emby/Items/' + itemId + '/Refresh?Recursive=false&MetadataRefreshMode=FullRefresh&ImageRefreshMode=Default&ReplaceAllMetadata=false&ReplaceAllImages=false&api_key=' + apiKey;
 
         console.log('[SubMerger] Refreshing item metadata (FullRefresh):', itemId);
@@ -442,15 +468,9 @@ define([], function () {
     }
 
     function checkCloudStatus(view) {
-        var apiClient = getApiClient();
-        var baseUrl = apiClient.serverAddress();
-        var apiKey = apiClient.accessToken();
-        var statusUrl = baseUrl + '/EmbySubtitleMerger/Status?api_key=' + apiKey;
-
         var cloudStatus = view.querySelector('#cloudStatus');
 
-        fetch(statusUrl)
-            .then(function(r) { return r.json(); })
+        getPlugin('Status')
             .then(function(data) {
                 console.log('[SubMerger] Status:', data);
                 if (data.CloudApiAvailable) {
@@ -491,7 +511,26 @@ define([], function () {
             }
         }
 
+        // DoubleSub.io decide seul de la disposition et n'applique pas les decalages
+        ['#layout', '#offset1', '#offset2'].forEach(function (selector) {
+            view.querySelector(selector).disabled = useCloudApi;
+        });
+
         console.log('[SubMerger] Mode selected: ' + (useCloudApi ? 'DoubleSub.io' : 'Local'));
+    }
+
+    // Affiche le fichier produit, demande a Emby de le prendre en compte, puis recharge les pistes
+    function showProducedThenRefresh(view, itemId, html) {
+        var result = view.querySelector('#result');
+        result.innerHTML = statusBox('ok', html + '<br><em>Actualisation des metadonnees...</em>');
+
+        refreshItemMetadata(view, itemId).then(function() {
+            result.innerHTML = statusBox('ok', html + '<br><em>Actualisation demandee : le sous-titre devrait apparaitre dans Emby.</em>');
+            // Ne pas ecraser la selection si l'utilisateur est passe a un autre film entre-temps
+            if (currentMovie && currentMovie.Id === itemId) {
+                reloadCurrentMovie(view);
+            }
+        });
     }
 
     function doMerge(view) {
@@ -510,21 +549,8 @@ define([], function () {
             return;
         }
 
-        // Recuperer les infos IsExternal et Path des sous-titres selectionnes
         var sel1 = sub1El.options[sub1El.selectedIndex];
         var sel2 = sub2El.options[sub2El.selectedIndex];
-        var sub1IsExternal = sel1.dataset.isExternal === 'true';
-        var sub1Path = sel1.dataset.path || '';
-        var sub2IsExternal = sel2.dataset.isExternal === 'true';
-        var sub2Path = sel2.dataset.path || '';
-
-        console.log('[SubMerger] Sub1: external=' + sub1IsExternal + ', path=' + sub1Path);
-        console.log('[SubMerger] Sub2: external=' + sub2IsExternal + ', path=' + sub2Path);
-
-        var mergeMode = view.querySelector('#mergeMode').value;
-        var tolerance = parseInt(view.querySelector('#tolerance').value) || 700;
-        var offset1 = parseInt(view.querySelector('#offset1').value) || 0;
-        var offset2 = parseInt(view.querySelector('#offset2').value) || 0;
 
         var doublesubApiKey = '';
         if (useCloudApi) {
@@ -540,55 +566,37 @@ define([], function () {
             localStorage.setItem('doublesub_api_key', doublesubApiKey);
         }
 
-        var modeLabel = useCloudApi ? 'DoubleSub.io' : 'locale';
-        log(view, 'Fusion ' + modeLabel + ' en cours...');
+        var cloud = useCloudApi;
+        var itemId = currentMovie.Id;
+        log(view, 'Fusion ' + (cloud ? 'DoubleSub.io' : 'locale') + ' en cours...');
 
-        var apiClient = getApiClient();
-        var embyApiKey = apiClient.accessToken();
-        var baseUrl = apiClient.serverAddress();
-        var url = baseUrl + '/EmbySubtitleMerger/Merge?api_key=' + embyApiKey;
-
-        // Utiliser le chemin de la version selectionnee si disponible
-        var videoPath = (currentMediaSource && currentMediaSource.Path) ? currentMediaSource.Path : currentMovie.Path;
-        console.log('[SubMerger] Merge URL: ' + url);
-        console.log('[SubMerger] VideoPath: ' + videoPath);
-
-        fetch(url, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                VideoPath: videoPath,
-                PrimaryIndex: parseInt(v1),
-                SecondaryIndex: parseInt(v2),
-                Primary1IsExternal: sub1IsExternal,
-                Primary1Path: sub1Path,
-                Primary2IsExternal: sub2IsExternal,
-                Primary2Path: sub2Path,
-                Mode: mergeMode,
-                ToleranceMs: tolerance,
-                Offset1Ms: offset1,
-                Offset2Ms: offset2,
-                UseCloudApi: useCloudApi,
-                DoubleSubApiKey: doublesubApiKey
-            })
+        postPlugin('Merge', {
+            VideoPath: currentVideoPath(),
+            PrimaryIndex: parseInt(v1),
+            SecondaryIndex: parseInt(v2),
+            Primary1IsExternal: sel1.dataset.isExternal === 'true',
+            Primary1Path: sel1.dataset.path || '',
+            Primary2IsExternal: sel2.dataset.isExternal === 'true',
+            Primary2Path: sel2.dataset.path || '',
+            Language1: sel1.dataset.lang || '',
+            Language2: sel2.dataset.lang || '',
+            Mode: view.querySelector('#mergeMode').value,
+            ToleranceMs: readTolerance(view),
+            Offset1Ms: parseInt(view.querySelector('#offset1').value) || 0,
+            Offset2Ms: parseInt(view.querySelector('#offset2').value) || 0,
+            Layout: view.querySelector('#layout').value,
+            UseCloudApi: cloud,
+            DoubleSubApiKey: doublesubApiKey
         })
-        .then(function (r) { return r.json(); })
         .then(function (data) {
             console.log('[SubMerger] Merge response:', data);
             if (data.Success) {
-                var modeUsed = useCloudApi ? ' (via DoubleSub.io)' : ' (local)';
-                success(view, 'Fusion reussie! ' + data.CueCount + ' sous-titres' + modeUsed);
-                result.innerHTML = '<div class="status-box status-ok"><strong>' + data.Message + '</strong><br><small>' + data.OutputPath + '</small><br><em>Actualisation des metadonnees...</em></div>';
-
-                // Rafraichir les metadonnees de l'element pour voir le nouveau sous-titre
-                refreshItemMetadata(view, currentMovie.Id).then(function() {
-                    result.innerHTML = '<div class="status-box status-ok"><strong>' + data.Message + '</strong><br><small>' + data.OutputPath + '</small><br><em>Sous-titre visible dans Emby!</em></div>';
-                    // Recharger les infos du film pour voir le nouveau sous-titre
-                    reloadCurrentMovie(view);
-                });
+                success(view, 'Fusion reussie! ' + data.CueCount + ' sous-titres' + (cloud ? ' (via DoubleSub.io)' : ' (local)'));
+                showProducedThenRefresh(view, itemId,
+                    '<strong>' + escapeHtml(data.Message) + '</strong><br><small>' + escapeHtml(data.OutputPath) + '</small>');
             } else {
                 error(view, 'Erreur: ' + data.Error);
-                result.innerHTML = '<div class="status-box status-error">' + data.Error + '</div>';
+                result.innerHTML = statusBox('error', escapeHtml(data.Error));
             }
         })
         .catch(function (e) {
@@ -597,88 +605,320 @@ define([], function () {
         });
     }
 
+    // ---------- Traduction (API Claude) ----------
+
+    function setTranslateRunning(view, running) {
+        var btnTranslate = view.querySelector('#btnTranslate');
+        var btnCancel = view.querySelector('#btnCancelTranslate');
+        var progress = view.querySelector('#translateProgress');
+
+        if (btnTranslate) btnTranslate.disabled = running;
+        if (btnCancel) btnCancel.style.display = running ? 'inline-block' : 'none';
+        if (progress) progress.style.display = running ? 'block' : 'none';
+    }
+
+    function updateTranslateProgress(view, data) {
+        var bar = view.querySelector('#translateProgressBar');
+        var label = view.querySelector('#translateProgressLabel');
+
+        if (bar) bar.style.width = (data.PercentComplete || 0) + '%';
+        if (label) {
+            var text = data.Message || 'Traduction en cours...';
+            if (data.Total > 0) {
+                text += ' (' + (data.PercentComplete || 0) + '%)';
+            }
+            label.textContent = text;
+        }
+    }
+
+    // Le job n'est plus suivi (termine, perdu ou abandonne) : la page redevient utilisable
+    function stopFollowingTranslation(view) {
+        currentTranslationJob = null;
+        currentTranslationItemId = null;
+        translationPollFailures = 0;
+        setTranslateRunning(view, false);
+    }
+
+    function doTranslate(view) {
+        var result = view.querySelector('#result');
+
+        if (!currentMovie) {
+            error(view, 'Selectionnez d\'abord un film ou un episode');
+            return;
+        }
+
+        var sourceEl = view.querySelector('#sub1');
+        var sourceValue = sourceEl.value;
+        if (!sourceValue) {
+            error(view, 'Choisissez la piste a traduire dans "Sous-titre 1"');
+            return;
+        }
+
+        var selected = sourceEl.options[sourceEl.selectedIndex];
+        if (selected.dataset.isText === 'false') {
+            error(view, 'La traduction ne fonctionne que sur les sous-titres texte (pas les sous-titres image)');
+            return;
+        }
+
+        // La cle n'est memorisee que dans ce navigateur ; vider le champ l'oublie
+        var anthropicKey = view.querySelector('#anthropicApiKey').value.trim();
+        if (anthropicKey) {
+            localStorage.setItem('anthropic_api_key', anthropicKey);
+        } else {
+            localStorage.removeItem('anthropic_api_key');
+        }
+
+        var itemId = currentMovie.Id;
+
+        log(view, 'Demarrage de la traduction...');
+        setTranslateRunning(view, true);
+
+        postPlugin('Translate', {
+            VideoPath: currentVideoPath(),
+            SourceIndex: parseInt(sourceValue),
+            SourceIsExternal: selected.dataset.isExternal === 'true',
+            SourcePath: selected.dataset.path || '',
+            SourceLanguage: selected.dataset.lang || '',
+            TargetLanguage: view.querySelector('#targetLanguage').value,
+            AnthropicApiKey: anthropicKey,
+            ThenMerge: view.querySelector('#translateThenMerge').checked,
+            MergeMode: view.querySelector('#mergeMode').value,
+            ToleranceMs: readTolerance(view),
+            Layout: view.querySelector('#layout').value
+        })
+        .then(function (data) {
+            console.log('[SubMerger] Translate response:', data);
+            if (!data.Success) {
+                setTranslateRunning(view, false);
+                error(view, 'Erreur: ' + data.Error);
+                result.innerHTML = statusBox('error', escapeHtml(data.Error));
+                return;
+            }
+            currentTranslationJob = data.JobId;
+            currentTranslationItemId = itemId;
+            translationPollFailures = 0;
+            pollTranslation(view);
+        })
+        .catch(function (e) {
+            setTranslateRunning(view, false);
+            console.error('[SubMerger] Translate error:', e);
+            error(view, 'Erreur: ' + e.message);
+        });
+    }
+
+    function schedulePoll(view, delayMs) {
+        clearTimeout(translationPollTimer);
+        // Page quittee : le suivi reprend au retour (viewshow)
+        if (!pageVisible) return;
+
+        translationPollTimer = setTimeout(function () {
+            pollTranslation(view);
+        }, delayMs);
+    }
+
+    function pollTranslation(view) {
+        var jobId = currentTranslationJob;
+        if (!jobId) return;
+
+        var result = view.querySelector('#result');
+
+        getPlugin('TranslateStatus', 'JobId=' + encodeURIComponent(jobId))
+            .then(function (data) {
+                if (jobId !== currentTranslationJob) return;
+                translationPollFailures = 0;
+
+                if (!data.Found) {
+                    stopFollowingTranslation(view);
+                    error(view, 'Job de traduction introuvable ou expire');
+                    return;
+                }
+
+                updateTranslateProgress(view, data);
+
+                if (data.Status === 'Running' || data.Status === 'Pending') {
+                    // Le job est long : on interroge toutes les 3 secondes
+                    schedulePoll(view, 3000);
+                    return;
+                }
+
+                var itemId = currentTranslationItemId;
+                stopFollowingTranslation(view);
+
+                if (data.Status === 'Completed') {
+                    var html = '<strong>' + escapeHtml(data.Message) + '</strong><br><small>'
+                        + escapeHtml(data.MergedPath || data.OutputPath) + '</small>';
+                    if (data.Untranslated > 0) {
+                        html += '<br><span style="color:#ff9800;">' + data.Untranslated + ' replique(s) non traduite(s), texte d\'origine conserve</span>';
+                    }
+                    html += '<br><small style="color:#888;">' + data.InputTokens + ' tokens entree / ' + data.OutputTokens + ' sortie</small>';
+
+                    success(view, 'Traduction terminee');
+                    showProducedThenRefresh(view, itemId, html);
+                } else if (data.Status === 'Cancelled') {
+                    log(view, 'Traduction annulee');
+                    result.innerHTML = statusBox('warning', 'Traduction annulee.');
+                } else {
+                    error(view, 'Echec: ' + (data.Error || 'erreur inconnue'));
+                    result.innerHTML = statusBox('error', escapeHtml(data.Error || 'Erreur inconnue'));
+                }
+            })
+            .catch(function (e) {
+                console.error('[SubMerger] Poll error:', e);
+                if (jobId !== currentTranslationJob) return;
+
+                // Une erreur reseau ponctuelle ne doit pas tuer le suivi, mais on ne retente pas sans fin
+                translationPollFailures++;
+                if (translationPollFailures >= 10) {
+                    stopFollowingTranslation(view);
+                    error(view, 'Suivi interrompu : le serveur ne repond plus. La traduction continue peut-etre cote serveur.');
+                    return;
+                }
+                schedulePoll(view, 5000);
+            });
+    }
+
+    function cancelTranslation(view) {
+        if (!currentTranslationJob) return;
+
+        log(view, 'Annulation demandee...');
+
+        postPlugin('TranslateCancel', { JobId: currentTranslationJob }).catch(function (e) {
+            console.error('[SubMerger] Cancel error:', e);
+        });
+    }
+
+    // ---------- Renommage des anciens .dual.srt ----------
+
+    function renameLegacyDual(view, dryRun) {
+        var box = view.querySelector('#renameResult');
+        var btnPreview = view.querySelector('#btnRenamePreview');
+        var btnApply = view.querySelector('#btnRenameApply');
+
+        btnPreview.disabled = true;
+        btnApply.disabled = true;
+        box.innerHTML = statusBox('info', dryRun ? 'Analyse des mediatheques...' : 'Renommage en cours...');
+
+        postPlugin('RenameLegacyDual', { DryRun: dryRun })
+        .then(function (data) {
+            btnPreview.disabled = false;
+            btnApply.disabled = false;
+
+            if (!data.Success) {
+                btnApply.style.display = 'none';
+                box.innerHTML = statusBox('error', escapeHtml(data.Error));
+                return;
+            }
+
+            var summary;
+            if (data.Found === 0) {
+                summary = 'Aucun fichier .dual.srt trouve dans ' + data.Folders.length + ' dossier(s) de mediatheque.';
+            } else if (dryRun) {
+                summary = data.Found + ' fichier(s) trouve(s) : ' + data.Renamed + ' a renommer, ' + data.Skipped + ' ignore(s).';
+            } else {
+                summary = data.Renamed + ' fichier(s) renomme(s), ' + data.Skipped + ' ignore(s), ' + data.Errors + ' erreur(s).';
+                if (data.Renamed > 0) {
+                    summary += ' Analyse de la mediatheque demandee.';
+                }
+            }
+
+            var rows = data.Items.map(function (item) {
+                var color = (item.Status === 'Renamed' || item.Status === 'WouldRename') ? '#4CAF50'
+                    : (item.Status === 'Error' ? '#f44336' : '#ff9800');
+                var target = item.NewName ? ' &rarr; <strong>' + escapeHtml(item.NewName) + '</strong>' : '';
+                return '<div style="padding:6px 8px; margin:4px 0; background:rgba(0,0,0,0.3); border-left:3px solid ' + color + '; border-radius:4px; font-size:0.85em;">'
+                    + escapeHtml(item.OldPath) + target
+                    + '<br><span style="color:#9fb0c2;">' + escapeHtml(item.Detail) + '</span></div>';
+            }).join('');
+
+            box.innerHTML = statusBox(data.Errors > 0 ? 'warning' : 'ok', '<strong>' + summary + '</strong>') + rows;
+
+            // Le bouton Renommer n'apparait qu'apres un apercu qui a quelque chose a renommer
+            btnApply.style.display = (dryRun && data.Renamed > 0) ? 'inline-block' : 'none';
+        })
+        .catch(function (e) {
+            btnPreview.disabled = false;
+            btnApply.disabled = false;
+            console.error('[SubMerger] Rename error:', e);
+            box.innerHTML = statusBox('error', 'Erreur: ' + escapeHtml(e.message));
+        });
+    }
+
+    // Branche les boutons et les listes. Appele une seule fois : viewshow peut se
+    // redeclencher sur la meme page, et un bouton branche deux fois lancerait deux traductions.
+    function bindEvents(view) {
+        function on(selector, eventName, handler) {
+            var element = view.querySelector(selector);
+            if (element) element.addEventListener(eventName, handler);
+        }
+
+        on('#btnLoad', 'click', function () { loadMovies(view); });
+
+        on('#moviesSelect', 'change', function () { onMovieChange(view); });
+        // Double-click pour selectionner
+        on('#moviesSelect', 'dblclick', function () { onMovieChange(view); });
+
+        // Recherche en temps reel
+        var searchTimeout;
+        on('#searchFilter', 'input', function () {
+            clearTimeout(searchTimeout);
+            searchTimeout = setTimeout(function() {
+                filterMovies(view);
+            }, 300);
+        });
+
+        // Recharger quand on change de filtre
+        on('#typeFilter', 'change', function () { if (allMovies.length > 0) loadMovies(view); });
+        on('#libraryFilter', 'change', function () { if (allMovies.length > 0) loadMovies(view); });
+
+        on('#btnRefresh', 'click', function () { refreshMovieMetadata(view); });
+        on('#btnMerge', 'click', function () { doMerge(view); });
+        on('#modeLocal', 'click', function () { selectMode(view, 'local'); });
+        on('#modeCloud', 'click', function () { selectMode(view, 'cloud'); });
+
+        on('#btnTranslate', 'click', function () { doTranslate(view); });
+        on('#btnCancelTranslate', 'click', function () { cancelTranslation(view); });
+
+        on('#btnRenamePreview', 'click', function () { renameLegacyDual(view, true); });
+        on('#btnRenameApply', 'click', function () { renameLegacyDual(view, false); });
+    }
+
     return function (view) {
         console.log('[SubMerger] Controller init v8.9.0');
 
+        var bound = false;
+
         view.addEventListener('viewshow', function () {
             console.log('[SubMerger] viewshow event');
+            pageVisible = true;
 
             // Charger les mediatheques
             loadLibraries(view);
 
-            var btnLoad = view.querySelector('#btnLoad');
-            var moviesSelect = view.querySelector('#moviesSelect');
-            var searchFilter = view.querySelector('#searchFilter');
-            var typeFilter = view.querySelector('#typeFilter');
-            var libraryFilter = view.querySelector('#libraryFilter');
-            var btnMerge = view.querySelector('#btnMerge');
-            var modeLocal = view.querySelector('#modeLocal');
-            var modeCloud = view.querySelector('#modeCloud');
-
-            if (btnLoad) {
-                btnLoad.addEventListener('click', function () {
-                    loadMovies(view);
-                });
+            if (!bound) {
+                bound = true;
+                bindEvents(view);
             }
 
-            if (moviesSelect) {
-                moviesSelect.addEventListener('change', function () {
-                    onMovieChange(view);
-                });
-                // Double-click pour selectionner
-                moviesSelect.addEventListener('dblclick', function () {
-                    onMovieChange(view);
-                });
+            var savedAnthropicKey = localStorage.getItem('anthropic_api_key');
+            var anthropicInput = view.querySelector('#anthropicApiKey');
+            if (savedAnthropicKey && anthropicInput) {
+                anthropicInput.value = savedAnthropicKey;
             }
 
-            // Recherche en temps reel
-            if (searchFilter) {
-                var searchTimeout;
-                searchFilter.addEventListener('input', function () {
-                    clearTimeout(searchTimeout);
-                    searchTimeout = setTimeout(function() {
-                        filterMovies(view);
-                    }, 300);
-                });
+            if (currentTranslationJob) {
+                // Une traduction tournait quand la page a ete quittee : on reprend son suivi
+                setTranslateRunning(view, true);
+                pollTranslation(view);
+            } else {
+                log(view, 'Pret - Selectionnez les filtres puis cliquez sur Charger');
             }
+        });
 
-            // Recharger quand on change de filtre
-            if (typeFilter) {
-                typeFilter.addEventListener('change', function () {
-                    if (allMovies.length > 0) loadMovies(view);
-                });
-            }
-            if (libraryFilter) {
-                libraryFilter.addEventListener('change', function () {
-                    if (allMovies.length > 0) loadMovies(view);
-                });
-            }
-
-            var btnRefresh = view.querySelector('#btnRefresh');
-            if (btnRefresh) {
-                btnRefresh.addEventListener('click', function () {
-                    refreshMovieMetadata(view);
-                });
-            }
-
-            if (btnMerge) {
-                btnMerge.addEventListener('click', function () {
-                    doMerge(view);
-                });
-            }
-
-            if (modeLocal) {
-                modeLocal.addEventListener('click', function () {
-                    selectMode(view, 'local');
-                });
-            }
-            if (modeCloud) {
-                modeCloud.addEventListener('click', function () {
-                    selectMode(view, 'cloud');
-                });
-            }
-
-            log(view, 'Pret - Selectionnez les filtres puis cliquez sur Charger');
+        // Quitter la page suspend le suivi ; la traduction continue cote serveur
+        view.addEventListener('viewhide', function () {
+            pageVisible = false;
+            clearTimeout(translationPollTimer);
+            translationPollTimer = null;
         });
     };
 });

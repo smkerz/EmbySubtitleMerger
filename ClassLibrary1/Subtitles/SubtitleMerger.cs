@@ -1,7 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
-using System.Text;
+using System.Text.RegularExpressions;
 
 namespace EmbySubtitleMerger.Subtitles
 {
@@ -19,6 +19,17 @@ namespace EmbySubtitleMerger.Subtitles
     }
     
     /// <summary>
+    /// Disposition des deux langues à l'écran
+    /// </summary>
+    public enum DualLayout
+    {
+        /// <summary>Langue 1 en haut, langue 2 en bas : deux répliques distinctes</summary>
+        TopBottom,
+        /// <summary>Les deux langues l'une sous l'autre en bas, sans balise de position</summary>
+        Stacked
+    }
+
+    /// <summary>
     /// Options de fusion
     /// </summary>
     public class MergeOptions
@@ -29,14 +40,34 @@ namespace EmbySubtitleMerger.Subtitles
         /// <summary>Tolérance en millisecondes pour considérer deux cues comme simultanés</summary>
         public int ToleranceMs { get; set; } = 700;
         
-        /// <summary>Couleur du sous-titre primaire (haut) - format ASS/HTML</summary>
+        /// <summary>Couleur du sous-titre primaire (langue 1) - format ASS/HTML</summary>
         public string? PrimaryColor { get; set; }
-        
-        /// <summary>Couleur du sous-titre secondaire (bas)</summary>
+
+        /// <summary>Couleur du sous-titre secondaire (langue 2)</summary>
         public string? SecondaryColor { get; set; }
-        
-        /// <summary>Ajouter le positionnement {\an8} pour le sous-titre du haut</summary>
-        public bool UsePositioning { get; set; } = true;
+
+        /// <summary>Disposition des deux langues à l'écran</summary>
+        public DualLayout Layout { get; set; } = DualLayout.TopBottom;
+
+        /// <summary>
+        /// Construit les options à partir des valeurs reçues d'une requête.
+        /// Une tolérance absente garde la valeur par défaut.
+        /// </summary>
+        public static MergeOptions From(string? mode, int? toleranceMs, string? color1, string? color2, string? layout)
+        {
+            var options = new MergeOptions
+            {
+                Mode = SubtitleMerger.ParseMode(mode),
+                Layout = SubtitleMerger.ParseLayout(layout),
+                PrimaryColor = color1,
+                SecondaryColor = color2
+            };
+
+            if (toleranceMs.HasValue)
+                options.ToleranceMs = toleranceMs.Value;
+
+            return options;
+        }
     }
     
     /// <summary>
@@ -44,11 +75,14 @@ namespace EmbySubtitleMerger.Subtitles
     /// </summary>
     public static class SubtitleMerger
     {
+        /// <summary>Balise placée en tête des répliques du haut en disposition haut/bas</summary>
+        public const string TopPositionTag = "{\\an8}";
+
         /// <summary>
         /// Fusionne deux listes de sous-titres
         /// </summary>
-        /// <param name="primary">Sous-titres primaires (affichés en haut)</param>
-        /// <param name="secondary">Sous-titres secondaires (affichés en bas)</param>
+        /// <param name="primary">Sous-titres primaires (langue 1, en haut en disposition haut/bas)</param>
+        /// <param name="secondary">Sous-titres secondaires (langue 2)</param>
         /// <param name="options">Options de fusion</param>
         /// <returns>Liste fusionnée</returns>
         public static List<SubtitleCue> Merge(
@@ -57,6 +91,9 @@ namespace EmbySubtitleMerger.Subtitles
             MergeOptions? options = null)
         {
             options ??= new MergeOptions();
+
+            if (options.Layout == DualLayout.TopBottom)
+                return MergeTopBottom(primary, secondary, options);
             
             return options.Mode switch
             {
@@ -264,29 +301,22 @@ namespace EmbySubtitleMerger.Subtitles
                 }
                 else
                 {
-                    // Juste le primaire avec positionnement
-                    var cue = new SubtitleCue
-                    {
-                        StartTime = pCue.StartTime,
-                        EndTime = pCue.EndTime,
-                        Text = options.UsePositioning ? $"{{\\an8}}{pCue.Text}" : pCue.Text
-                    };
-                    result.Add(cue);
+                    // Juste le primaire
+                    var cue = CreateMergedCue(pCue.StartTime, pCue.EndTime, pCue, null, options);
+                    if (cue != null)
+                        result.Add(cue);
                 }
             }
-            
+
             // Ajouter les secondaires non chevauchés
             foreach (var sCue in secondary)
             {
                 bool hasOverlap = primary.Any(p => CuesOverlap(p, sCue, toleranceTicks));
                 if (!hasOverlap)
                 {
-                    result.Add(new SubtitleCue
-                    {
-                        StartTime = sCue.StartTime,
-                        EndTime = sCue.EndTime,
-                        Text = sCue.Text
-                    });
+                    var cue = CreateMergedCue(sCue.StartTime, sCue.EndTime, null, sCue, options);
+                    if (cue != null)
+                        result.Add(cue);
                 }
             }
             
@@ -299,71 +329,137 @@ namespace EmbySubtitleMerger.Subtitles
         }
         
         /// <summary>
-        /// Crée un cue fusionné à partir de deux cues
+        /// Convertit la valeur reçue de l'interface en disposition
+        /// </summary>
+        public static DualLayout ParseLayout(string? value)
+        {
+            return string.Equals(value, "stacked", StringComparison.OrdinalIgnoreCase)
+                ? DualLayout.Stacked
+                : DualLayout.TopBottom;
+        }
+
+        /// <summary>
+        /// Convertit la valeur reçue de l'interface (all, overlapping, primary) en mode de fusion
+        /// </summary>
+        public static MergeMode ParseMode(string? value)
+        {
+            return (value ?? string.Empty).ToLowerInvariant() switch
+            {
+                "overlapping" => MergeMode.OverlappingOnly,
+                "primary" => MergeMode.PrimaryPriority,
+                _ => MergeMode.AllCues
+            };
+        }
+
+        /// <summary>
+        /// Texte d'une réplique source, sans ses balises de position.
+        /// La position est décidée par la disposition choisie : une balise {\an8} héritée
+        /// de la source enverrait la langue du bas en haut.
+        /// </summary>
+        private static string CleanText(SubtitleCue cue)
+        {
+            return PositionTagRegex.Replace(cue.Text, string.Empty).Trim();
+        }
+
+        private static readonly Regex PositionTagRegex = new Regex(@"\{\\an?\d+\}", RegexOptions.Compiled);
+
+        /// <summary>
+        /// Disposition haut/bas : chaque langue garde ses propres répliques et son propre minutage.
+        /// En SRT, {\an8} s'applique à une réplique entière : une réplique qui contiendrait les deux
+        /// langues monterait en bloc en haut, et le texte sauterait d'une position à l'autre.
+        /// </summary>
+        private static List<SubtitleCue> MergeTopBottom(
+            List<SubtitleCue> primary,
+            List<SubtitleCue> secondary,
+            MergeOptions options)
+        {
+            var toleranceTicks = TimeSpan.FromMilliseconds(options.ToleranceMs).Ticks;
+
+            SnapTimings(primary, secondary, toleranceTicks / 2);
+
+            IEnumerable<SubtitleCue> top = primary;
+            IEnumerable<SubtitleCue> bottom = secondary;
+
+            if (options.Mode == MergeMode.OverlappingOnly)
+            {
+                top = primary.Where(p => secondary.Any(s => CuesOverlap(p, s, toleranceTicks)));
+                bottom = secondary.Where(s => primary.Any(p => CuesOverlap(p, s, toleranceTicks)));
+            }
+            else if (options.Mode == MergeMode.PrimaryPriority)
+            {
+                // Le secondaire accompagne le primaire (première réplique qui chevauche) ou comble les trous
+                var paired = new HashSet<SubtitleCue>();
+                foreach (var pCue in primary)
+                {
+                    var match = secondary.FirstOrDefault(s => CuesOverlap(pCue, s, toleranceTicks));
+                    if (match != null) paired.Add(match);
+                }
+
+                bottom = secondary.Where(s =>
+                    paired.Contains(s) || !primary.Any(p => CuesOverlap(p, s, toleranceTicks)));
+            }
+
+            IEnumerable<SubtitleCue> Track(IEnumerable<SubtitleCue> cues, string prefix, string? color)
+            {
+                foreach (var cue in cues)
+                {
+                    var text = CleanText(cue);
+                    if (text.Length == 0) continue;
+
+                    yield return new SubtitleCue
+                    {
+                        StartTime = cue.StartTime,
+                        EndTime = cue.EndTime,
+                        Text = prefix + Colorize(text, color)
+                    };
+                }
+            }
+
+            var result = Track(top, TopPositionTag, options.PrimaryColor)
+                .Concat(Track(bottom, string.Empty, options.SecondaryColor))
+                // Tri stable : à minutage égal, la réplique du haut reste avant celle du bas
+                .OrderBy(c => c.StartTime)
+                .ToList();
+
+            for (int i = 0; i < result.Count; i++)
+                result[i].Index = i + 1;
+
+            return result;
+        }
+
+        private static string Colorize(string text, string? color)
+        {
+            return string.IsNullOrEmpty(color) ? text : $"<font color=\"{color}\">{text}</font>";
+        }
+
+        /// <summary>
+        /// Crée une réplique empilée : langue 1 puis langue 2, l'une sous l'autre, sans balise de position
         /// </summary>
         private static SubtitleCue? CreateMergedCue(
-            TimeSpan start, 
-            TimeSpan end, 
-            SubtitleCue? primary, 
+            TimeSpan start,
+            TimeSpan end,
+            SubtitleCue? primary,
             SubtitleCue? secondary,
             MergeOptions options)
         {
-            if (primary == null && secondary == null)
+            var parts = new List<string>(2);
+
+            var primaryText = primary == null ? string.Empty : CleanText(primary);
+            if (primaryText.Length > 0)
+                parts.Add(Colorize(primaryText, options.PrimaryColor));
+
+            var secondaryText = secondary == null ? string.Empty : CleanText(secondary);
+            if (secondaryText.Length > 0)
+                parts.Add(Colorize(secondaryText, options.SecondaryColor));
+
+            if (parts.Count == 0)
                 return null;
-            
-            var sb = new StringBuilder();
-            
-            // Texte primaire (en haut)
-            if (primary != null && !string.IsNullOrWhiteSpace(primary.Text))
-            {
-                var text = primary.Text.Trim();
-                
-                // Ajouter positionnement en haut
-                if (options.UsePositioning)
-                    sb.Append("{\\an8}");
-                
-                // Ajouter couleur si spécifiée
-                if (!string.IsNullOrEmpty(options.PrimaryColor))
-                    sb.Append($"<font color=\"{options.PrimaryColor}\">");
-                
-                sb.Append(text);
-                
-                if (!string.IsNullOrEmpty(options.PrimaryColor))
-                    sb.Append("</font>");
-            }
-            
-            // Séparateur si les deux existent
-            if (primary != null && secondary != null && 
-                !string.IsNullOrWhiteSpace(primary.Text) && 
-                !string.IsNullOrWhiteSpace(secondary.Text))
-            {
-                sb.AppendLine();
-            }
-            
-            // Texte secondaire (en bas, position par défaut)
-            if (secondary != null && !string.IsNullOrWhiteSpace(secondary.Text))
-            {
-                var text = secondary.Text.Trim();
-                
-                // Ajouter couleur si spécifiée
-                if (!string.IsNullOrEmpty(options.SecondaryColor))
-                    sb.Append($"<font color=\"{options.SecondaryColor}\">");
-                
-                sb.Append(text);
-                
-                if (!string.IsNullOrEmpty(options.SecondaryColor))
-                    sb.Append("</font>");
-            }
-            
-            var finalText = sb.ToString().Trim();
-            if (string.IsNullOrEmpty(finalText))
-                return null;
-            
+
             return new SubtitleCue
             {
                 StartTime = start,
                 EndTime = end,
-                Text = finalText
+                Text = string.Join(Environment.NewLine, parts)
             };
         }
         

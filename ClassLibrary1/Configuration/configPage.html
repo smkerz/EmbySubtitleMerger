@@ -31,6 +31,10 @@
                     .option-group { display: flex; flex-direction: column; gap: 5px; }
                     .option-group label { color: #9fb0c2; font-size: 0.9em; }
                     .option-group select, .option-group input[type="number"] { width: 100%; padding: 8px; border: 1px solid #444; border-radius: 5px; background: rgba(0,0,0,0.3); color: #e6eaf0; }
+                    .progress-track { width: 100%; height: 10px; background: rgba(0,0,0,0.4); border-radius: 5px; overflow: hidden; margin-top: 10px; }
+                    .progress-fill { height: 100%; width: 0%; background: #00a4dc; transition: width 0.4s ease; }
+                    .progress-label { color: #9fb0c2; font-size: 0.85em; margin-top: 8px; display: block; }
+                    .ai-badge { background: #8e5cd9; color: white; padding: 2px 6px; border-radius: 4px; font-size: 0.7em; margin-left: 5px; }
                 </style>
 
                 <!-- Info Section -->
@@ -88,11 +92,11 @@
                     </p>
                     <div style="display:grid; grid-template-columns:1fr 1fr; gap:15px;">
                         <div>
-                            <label style="color:#9fb0c2;">Sous-titre 1 (HAUT)</label>
+                            <label style="color:#9fb0c2;">Sous-titre 1 (langue 1, en haut)</label>
                             <select id="sub1" is="emby-select" style="width:100%;"><option value="">--</option></select>
                         </div>
                         <div>
-                            <label style="color:#9fb0c2;">Sous-titre 2 (BAS)</label>
+                            <label style="color:#9fb0c2;">Sous-titre 2 (langue 2, en bas)</label>
                             <select id="sub2" is="emby-select" style="width:100%;"><option value="">--</option></select>
                         </div>
                     </div>
@@ -127,6 +131,13 @@
                         <div class="option-group">
                             <label for="offset2">Decalage sous-titre 2 (ms):</label>
                             <input type="number" id="offset2" value="0" step="100">
+                        </div>
+                        <div class="option-group">
+                            <label for="layout">Disposition a l'ecran:</label>
+                            <select id="layout" is="emby-select">
+                                <option value="topbottom">Langue 1 en haut, langue 2 en bas</option>
+                                <option value="stacked">Tout en bas, l'une sous l'autre (compatible tous ecrans)</option>
+                            </select>
                         </div>
                     </div>
                 </div>
@@ -164,6 +175,99 @@
                     <button id="btnMerge" type="button" is="emby-button" class="raised button-submit">
                         <span>Fusionner les sous-titres</span>
                     </button>
+                </div>
+
+                <!-- Step 7: Translate -->
+                <div id="translateSection" class="merger-card" style="display:none;">
+                    <h3>7. Traduire <span class="ai-badge">IA</span></h3>
+                    <p style="color:#9fb0c2; font-size:0.85em; margin:0 0 12px 0;">
+                        Traduit integralement la piste choisie en <strong>Sous-titre 1</strong> ci-dessus, via l'API Claude (payante).
+                        Les timings sont conserves a l'identique. Un film prend plusieurs minutes ; vous pouvez quitter la page et y revenir.
+                    </p>
+
+                    <div class="options-grid">
+                        <div class="option-group">
+                            <label for="targetLanguage">Langue cible:</label>
+                            <select id="targetLanguage" is="emby-select">
+                                <option value="fr">Francais</option>
+                                <option value="en">Anglais</option>
+                                <option value="es">Espagnol</option>
+                                <option value="de">Allemand</option>
+                                <option value="it">Italien</option>
+                                <option value="pt">Portugais</option>
+                                <option value="nl">Neerlandais</option>
+                                <option value="pl">Polonais</option>
+                                <option value="ru">Russe</option>
+                                <option value="ja">Japonais</option>
+                                <option value="ko">Coreen</option>
+                                <option value="zh">Chinois (simplifie)</option>
+                                <option value="ar">Arabe</option>
+                                <option value="tr">Turc</option>
+                                <option value="sv">Suedois</option>
+                                <option value="da">Danois</option>
+                                <option value="no">Norvegien</option>
+                                <option value="fi">Finnois</option>
+                                <option value="cs">Tcheque</option>
+                                <option value="el">Grec</option>
+                                <option value="he">Hebreu</option>
+                                <option value="hi">Hindi</option>
+                                <option value="uk">Ukrainien</option>
+                                <option value="ro">Roumain</option>
+                                <option value="hu">Hongrois</option>
+                                <option value="th">Thai</option>
+                                <option value="vi">Vietnamien</option>
+                                <option value="id">Indonesien</option>
+                            </select>
+                        </div>
+                        <div class="option-group">
+                            <label for="anthropicApiKey">Cle API Anthropic:</label>
+                            <input type="password" id="anthropicApiKey" placeholder="sk-ant-..." style="width:100%; padding:8px; border:1px solid #444; border-radius:5px; background:rgba(0,0,0,0.3); color:#e6eaf0; font-family:monospace;">
+                        </div>
+                    </div>
+
+                    <p style="color:#9fb0c2; font-size:0.8em; margin-top:8px;">
+                        Obtenez une cle sur <a href="https://console.anthropic.com/settings/keys" target="_blank" style="color:#00a4dc;">console.anthropic.com</a>.
+                    </p>
+
+                    <label style="display:flex; align-items:center; gap:8px; margin-top:12px; color:#e6eaf0; cursor:pointer;">
+                        <input type="checkbox" id="translateThenMerge" checked>
+                        <span>Fusionner ensuite avec la piste source pour produire un sous-titre bilingue (traduction en langue 1, source en langue 2)</span>
+                    </label>
+
+                    <div style="display:flex; gap:10px; align-items:center; margin-top:15px;">
+                        <button id="btnTranslate" type="button" is="emby-button" class="raised button-submit">
+                            <span>Traduire</span>
+                        </button>
+                        <button id="btnCancelTranslate" type="button" is="emby-button" class="raised" style="display:none;">
+                            <span>Annuler</span>
+                        </button>
+                    </div>
+
+                    <div id="translateProgress" style="display:none;">
+                        <div class="progress-track">
+                            <div id="translateProgressBar" class="progress-fill"></div>
+                        </div>
+                        <span id="translateProgressLabel" class="progress-label">Preparation...</span>
+                    </div>
+                </div>
+
+                <!-- Maintenance: rename legacy dual subtitles -->
+                <div class="merger-card">
+                    <h3>Renommer les anciens sous-titres bilingues</h3>
+                    <p style="color:#9fb0c2; font-size:0.85em; margin:0 0 12px 0;">
+                        Les fusions s'appelaient auparavant <em>Film.dual.srt</em> et s'affichaient "(SRT) dual" dans le lecteur.
+                        Cet outil parcourt toutes les mediatheques, detecte les deux langues de chaque fichier et le renomme,
+                        par exemple en <em>Film.Français + English.fr.srt</em>.
+                    </p>
+                    <div style="display:flex; gap:10px; align-items:center;">
+                        <button id="btnRenamePreview" type="button" is="emby-button" class="raised">
+                            <span>Apercu</span>
+                        </button>
+                        <button id="btnRenameApply" type="button" is="emby-button" class="raised button-submit" style="display:none;">
+                            <span>Renommer</span>
+                        </button>
+                    </div>
+                    <div id="renameResult" style="margin-top:12px;"></div>
                 </div>
 
                 <!-- Result -->
