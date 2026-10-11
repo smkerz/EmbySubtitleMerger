@@ -5,11 +5,15 @@
 (function() {
     'use strict';
 
-    console.log('[SubMerger] UI Injector loaded v9.8.0');
+    console.log('[SubMerger] UI Injector loaded v9.9.0');
 
     var INJECTOR_ID = 'subtitleMergerSection';
     var currentItemId = null;
     var subtitles = [];
+    var mergeJob = null;            // Id de la fusion en cours cote serveur
+    var mergePollTimer = null;
+    var mergePollFailures = 0;
+    var mergeStarted = 0;
 
     // Observer pour detecter les changements de page
     function setupObserver() {
@@ -82,6 +86,59 @@
         return null;
     }
 
+    // ---------- Pistes de sous-titres ----------
+
+    function escapeHtml(text) {
+        return String(text == null ? '' : text)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;');
+    }
+
+    function readSubtitles(item) {
+        var list = [];
+        var streams = item.MediaStreams || [];
+        for (var i = 0; i < streams.length; i++) {
+            var s = streams[i];
+            if (s.Type === 'Subtitle') {
+                list.push({
+                    index: s.Index,
+                    language: s.Language || '',
+                    codec: s.Codec || '?',
+                    isExternal: !!s.IsExternal,
+                    isText: !!s.IsTextSubtitleStream,
+                    isForced: !!s.IsForced || /forced/i.test(s.Title || ''),
+                    path: s.Path || '',
+                    title: s.Title || ''
+                });
+            }
+        }
+        return list;
+    }
+
+    // Meme convention que la page du plugin : [OK] utilisable, [!] avec une reserve, [X] non utilisable
+    function describe(sub) {
+        if (!sub.isText) return { mark: '[X]', note: 'image, pas de texte a fusionner' };
+        if (sub.isExternal && !sub.path) return { mark: '[X]', note: 'fichier externe introuvable' };
+        if (sub.isForced) return { mark: '[!]', note: 'forced : quelques repliques seulement' };
+        return { mark: '[OK]', note: '' };
+    }
+
+    function optionsHtml() {
+        var html = '<option value="">-- Choisir --</option>';
+        for (var i = 0; i < subtitles.length; i++) {
+            var s = subtitles[i];
+            var info = describe(s);
+            var label = info.mark + ' #' + s.index + ' ' + (s.language || 'und').toUpperCase() + ' (' + s.codec + ')'
+                + (s.isExternal ? ' [EXT]' : ' [INT]')
+                + (s.title ? ' - ' + s.title : '')
+                + (info.note ? ' : ' + info.note : '');
+            html += '<option value="' + i + '"' + (info.mark === '[X]' ? ' disabled' : '') + '>' + escapeHtml(label) + '</option>';
+        }
+        return html;
+    }
+
     // Charger les sous-titres depuis l'API Emby
     function loadSubtitlesAndInject(container, afterElement, itemId) {
         var apiClient = window.ApiClient;
@@ -96,92 +153,53 @@
 
         apiClient.getJSON(url).then(function(item) {
             console.log('[SubMerger] Item loaded:', item.Name);
-
-            // Extraire les sous-titres
-            subtitles = [];
-            var streams = item.MediaStreams || [];
-            for (var i = 0; i < streams.length; i++) {
-                var s = streams[i];
-                if (s.Type === 'Subtitle') {
-                    subtitles.push({
-                        index: s.Index,
-                        language: s.Language || 'und',
-                        codec: s.Codec || '?',
-                        isExternal: s.IsExternal,
-                        isText: s.IsTextSubtitleStream,
-                        title: s.Title || ''
-                    });
-                }
-            }
-
-            // Injecter la section
+            subtitles = readSubtitles(item);
             injectMergeSection(container, afterElement, item);
         }).catch(function(err) {
             console.error('[SubMerger] Error loading item:', err);
         });
     }
 
-    // Injecter la section de fusion
+    // ---------- Section de fusion ----------
+
+    // Les couleurs de texte sont celles du theme d'Emby : la section reste lisible en clair comme en sombre
+    var FIELD_STYLE = 'width:100%; padding:8px; background:rgba(128,128,128,0.15); border:1px solid rgba(128,128,128,0.5); border-radius:5px; color:inherit; box-sizing:border-box;';
+    var LABEL_STYLE = 'display:block; margin-bottom:5px; opacity:0.75;';
+
     function injectMergeSection(container, afterElement, item) {
         var section = document.createElement('div');
         section.id = INJECTOR_ID;
         section.className = 'verticalSection';
         section.style.cssText = 'margin-top: 2em; padding: 1em; background: rgba(0,164,220,0.1); border-radius: 8px; border: 1px solid rgba(0,164,220,0.3);';
 
-        var html = '<h2 class="sectionTitle" style="color: #00a4dc; margin: 0 0 1em 0;">';
-        html += '<span style="margin-right: 8px;">&#x1F500;</span>Fusionner les sous-titres</h2>';
+        var html = '<h2 class="sectionTitle" style="color: #00a4dc; margin: 0 0 1em 0;">Fusionner les sous-titres</h2>';
 
         if (subtitles.length < 2) {
             html += '<p style="color: #ff9800;">Il faut au moins 2 sous-titres pour pouvoir les fusionner.</p>';
         } else {
             html += '<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-bottom: 15px;">';
-
-            // Select 1
-            html += '<div>';
-            html += '<label style="color: #9fb0c2; display: block; margin-bottom: 5px;">Sous-titre 1 (HAUT)</label>';
-            html += '<select id="mergeSub1" style="width: 100%; padding: 8px; background: rgba(0,0,0,0.3); border: 1px solid #444; border-radius: 5px; color: #e6eaf0;">';
-            html += '<option value="">-- Choisir --</option>';
-            for (var i = 0; i < subtitles.length; i++) {
-                var s = subtitles[i];
-                var label = '#' + s.index + ' ' + s.language.toUpperCase() + ' (' + s.codec + ')';
-                label += s.isExternal ? ' [EXT]' : ' [INT]';
-                if (!s.isText) label += ' [IMAGE]';
-                html += '<option value="' + s.index + '">' + label + '</option>';
-            }
-            html += '</select></div>';
-
-            // Select 2
-            html += '<div>';
-            html += '<label style="color: #9fb0c2; display: block; margin-bottom: 5px;">Sous-titre 2 (BAS)</label>';
-            html += '<select id="mergeSub2" style="width: 100%; padding: 8px; background: rgba(0,0,0,0.3); border: 1px solid #444; border-radius: 5px; color: #e6eaf0;">';
-            html += '<option value="">-- Choisir --</option>';
-            for (var j = 0; j < subtitles.length; j++) {
-                var s2 = subtitles[j];
-                var label2 = '#' + s2.index + ' ' + s2.language.toUpperCase() + ' (' + s2.codec + ')';
-                label2 += s2.isExternal ? ' [EXT]' : ' [INT]';
-                if (!s2.isText) label2 += ' [IMAGE]';
-                html += '<option value="' + s2.index + '">' + label2 + '</option>';
-            }
-            html += '</select></div>';
-
+            html += '<div><label style="' + LABEL_STYLE + '">Sous-titre 1 (langue 1, en haut)</label>';
+            html += '<select id="mergeSub1" style="' + FIELD_STYLE + '">' + optionsHtml() + '</select></div>';
+            html += '<div><label style="' + LABEL_STYLE + '">Sous-titre 2 (langue 2, en bas)</label>';
+            html += '<select id="mergeSub2" style="' + FIELD_STYLE + '">' + optionsHtml() + '</select></div>';
             html += '</div>';
 
-            // Options avancees (collapsed)
             html += '<details style="margin-bottom: 15px;">';
-            html += '<summary style="color: #9fb0c2; cursor: pointer;">Options avancees</summary>';
-            html += '<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 10px; padding: 10px; background: rgba(0,0,0,0.2); border-radius: 5px;">';
-            html += '<div><label style="color: #888; font-size: 0.85em;">Mode</label>';
-            html += '<select id="mergeMode" style="width:100%; padding:5px; background:rgba(0,0,0,0.3); border:1px solid #333; border-radius:4px; color:#e6eaf0;">';
+            html += '<summary style="cursor: pointer; opacity:0.75;">Options avancees</summary>';
+            html += '<div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; margin-top: 10px;">';
+            html += '<div><label style="' + LABEL_STYLE + '">Disposition</label>';
+            html += '<select id="mergeLayout" style="' + FIELD_STYLE + '">';
+            html += '<option value="topbottom">Langue 1 en haut, langue 2 en bas</option><option value="stacked">Les deux en bas</option></select></div>';
+            html += '<div><label style="' + LABEL_STYLE + '">Mode</label>';
+            html += '<select id="mergeMode" style="' + FIELD_STYLE + '">';
             html += '<option value="all">Tous</option><option value="overlapping">Chevauchement</option><option value="primary">Priorite langue 1</option></select></div>';
-            html += '<div><label style="color: #888; font-size: 0.85em;">Tolerance (ms)</label>';
-            html += '<input type="number" id="mergeTolerance" value="700" style="width:100%; padding:5px; background:rgba(0,0,0,0.3); border:1px solid #333; border-radius:4px; color:#e6eaf0;"></div>';
+            html += '<div><label style="' + LABEL_STYLE + '">Tolerance (ms)</label>';
+            html += '<input type="number" id="mergeTolerance" value="700" style="' + FIELD_STYLE + '"></div>';
             html += '</div></details>';
 
-            // Bouton fusionner
             html += '<button id="btnMergeInject" type="button" style="background: linear-gradient(135deg, #00a4dc, #6366f1); color: white; border: none; padding: 12px 24px; border-radius: 8px; font-weight: 600; cursor: pointer; width: 100%;">';
             html += 'Fusionner les sous-titres</button>';
 
-            // Zone resultat
             html += '<div id="mergeResultInject" style="margin-top: 10px;"></div>';
         }
 
@@ -194,7 +212,6 @@
             container.appendChild(section);
         }
 
-        // Attacher l'event listener au bouton
         var btn = document.getElementById('btnMergeInject');
         if (btn) {
             btn.addEventListener('click', function() {
@@ -205,69 +222,143 @@
         console.log('[SubMerger] Merge section injected');
     }
 
-    // Executer la fusion
+    // ---------- Fusion (tache de fond sur le serveur, suivie par interrogation) ----------
+
+    function pluginUrl(name, query) {
+        var apiClient = window.ApiClient;
+        var url = apiClient.serverAddress() + '/EmbySubtitleMerger/' + name + '?api_key=' + apiClient.accessToken();
+        return query ? url + '&' + query : url;
+    }
+
+    // Un proxy ou Emby peut repondre par une page d'erreur HTML : on le dit clairement
+    function readJson(response) {
+        return response.text().then(function(text) {
+            try {
+                return JSON.parse(text);
+            } catch (e) {
+                throw new Error('reponse inattendue du serveur (HTTP ' + response.status + ')');
+            }
+        });
+    }
+
+    function setMerging(running) {
+        var btn = document.getElementById('btnMergeInject');
+        if (!btn) return;
+        btn.disabled = running;
+        btn.style.opacity = running ? '0.6' : '1';
+        btn.textContent = running ? 'Fusion en cours...' : 'Fusionner les sous-titres';
+    }
+
+    function finishMerge(item, data) {
+        var result = document.getElementById('mergeResultInject');
+
+        clearTimeout(mergePollTimer);
+        mergeJob = null;
+        setMerging(false);
+
+        if (data.Success) {
+            showResult(result, 'success', 'Fusion reussie ! ' + data.CueCount + ' sous-titres crees. Actualisation...');
+            refreshAndReload(item, result, data);
+        } else {
+            showResult(result, 'error', 'Erreur : ' + data.Error);
+        }
+    }
+
+    // L'extraction des pistes d'un gros film dure plusieurs minutes : le serveur travaille en tache de fond
+    function pollMerge(item) {
+        clearTimeout(mergePollTimer);
+        if (!mergeJob) return;
+
+        // La fenetre des sous-titres a ete fermee : la fusion continue sur le serveur, le suivi s'arrete
+        var result = document.getElementById('mergeResultInject');
+        if (!result) {
+            mergeJob = null;
+            return;
+        }
+
+        fetch(pluginUrl('MergeStatus', 'JobId=' + encodeURIComponent(mergeJob)))
+            .then(readJson)
+            .then(function(data) {
+                mergePollFailures = 0;
+                if (!mergeJob) return;
+
+                if (!data.Running) {
+                    finishMerge(item, data);
+                    return;
+                }
+
+                var seconds = Math.round((Date.now() - mergeStarted) / 1000);
+                showResult(result, 'info', (data.Step || 'Fusion en cours') + '... ' + seconds + ' s'
+                    + (seconds >= 30 ? ' (plusieurs minutes pour un gros film)' : ''));
+                mergePollTimer = setTimeout(function() { pollMerge(item); }, 2000);
+            })
+            .catch(function(err) {
+                console.error('[SubMerger] Merge status error:', err);
+                if (++mergePollFailures >= 10) {
+                    finishMerge(item, { Success: false, Error: 'suivi de la fusion impossible (' + err.message
+                        + '). Elle continue peut-etre sur le serveur.' });
+                } else {
+                    mergePollTimer = setTimeout(function() { pollMerge(item); }, 3000);
+                }
+            });
+    }
+
     function doMerge(item) {
         var sub1 = document.getElementById('mergeSub1');
         var sub2 = document.getElementById('mergeSub2');
         var result = document.getElementById('mergeResultInject');
-        var btn = document.getElementById('btnMergeInject');
 
-        if (!sub1 || !sub2) return;
+        if (!sub1 || !sub2 || mergeJob) return;
 
-        var v1 = sub1.value;
-        var v2 = sub2.value;
-
-        if (!v1 || !v2) {
+        if (sub1.value === '' || sub2.value === '') {
             showResult(result, 'error', 'Selectionnez 2 sous-titres');
             return;
         }
-        if (v1 === v2) {
+        if (sub1.value === sub2.value) {
             showResult(result, 'error', 'Choisissez 2 sous-titres differents');
             return;
         }
 
-        var mode = document.getElementById('mergeMode');
-        var tolerance = document.getElementById('mergeTolerance');
+        var first = subtitles[parseInt(sub1.value)];
+        var second = subtitles[parseInt(sub2.value)];
+        var tolerance = parseInt(document.getElementById('mergeTolerance').value);
 
-        btn.disabled = true;
-        btn.textContent = 'Fusion en cours...';
-        showResult(result, 'info', 'Traitement en cours...');
+        setMerging(true);
+        mergeStarted = Date.now();
+        mergePollFailures = 0;
+        showResult(result, 'info', 'Demarrage...');
 
-        var apiClient = window.ApiClient;
-        var apiKey = apiClient.accessToken();
-        var baseUrl = apiClient.serverAddress();
-        var url = baseUrl + '/EmbySubtitleMerger/Merge?api_key=' + apiKey;
-
-        fetch(url, {
+        fetch(pluginUrl('Merge'), {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 VideoPath: item.Path,
-                PrimaryIndex: parseInt(v1),
-                SecondaryIndex: parseInt(v2),
-                Mode: mode ? mode.value : 'all',
-                ToleranceMs: tolerance ? parseInt(tolerance.value) : 700,
-                UseCloudApi: false
+                PrimaryIndex: first.index,
+                SecondaryIndex: second.index,
+                Primary1IsExternal: first.isExternal,
+                Primary1Path: first.path,
+                Primary2IsExternal: second.isExternal,
+                Primary2Path: second.path,
+                Language1: first.language,
+                Language2: second.language,
+                Layout: document.getElementById('mergeLayout').value,
+                Mode: document.getElementById('mergeMode').value,
+                ToleranceMs: isNaN(tolerance) ? 700 : tolerance,
+                UseCloudApi: false,
+                Background: true
             })
         })
-        .then(function(r) { return r.json(); })
+        .then(readJson)
         .then(function(data) {
-            btn.disabled = false;
-            btn.textContent = 'Fusionner les sous-titres';
-
-            if (data.Success) {
-                showResult(result, 'success', 'Fusion reussie! ' + data.CueCount + ' sous-titres crees. Actualisation...');
-
-                // Rafraichir les metadonnees Emby pour detecter le nouveau sous-titre
-                refreshAndReload(item, result, data);
+            if (data.Running && data.JobId) {
+                mergeJob = data.JobId;
+                pollMerge(item);
             } else {
-                showResult(result, 'error', 'Erreur: ' + data.Error);
+                finishMerge(item, data);
             }
         })
         .catch(function(err) {
-            btn.disabled = false;
-            btn.textContent = 'Fusionner les sous-titres';
-            showResult(result, 'error', 'Erreur: ' + err.message);
+            finishMerge(item, { Success: false, Error: err.message });
         });
     }
 
@@ -276,86 +367,43 @@
         var apiClient = window.ApiClient;
         if (!apiClient) return;
 
-        var apiKey = apiClient.accessToken();
-        var baseUrl = apiClient.serverAddress();
         var itemId = currentItemId;
+        var done = 'Fusion reussie ! ' + mergeData.CueCount + ' sous-titres crees. ';
 
-        // Appeler l'API de refresh Emby avec FullRefresh pour forcer la detection du nouveau fichier
-        var refreshUrl = baseUrl + '/emby/Items/' + itemId + '/Refresh?Recursive=false&MetadataRefreshMode=FullRefresh&ImageRefreshMode=Default&ReplaceAllMetadata=false&ReplaceAllImages=false&api_key=' + apiKey;
-
-        console.log('[SubMerger] Refreshing item metadata:', itemId);
+        // FullRefresh force Emby a detecter le nouveau fichier
+        var refreshUrl = apiClient.serverAddress() + '/emby/Items/' + itemId
+            + '/Refresh?Recursive=false&MetadataRefreshMode=FullRefresh&ImageRefreshMode=Default&ReplaceAllMetadata=false&ReplaceAllImages=false&api_key='
+            + apiClient.accessToken();
 
         fetch(refreshUrl, { method: 'POST' })
             .then(function() {
-                console.log('[SubMerger] Refresh triggered, waiting...');
-                // Attendre qu'Emby traite le refresh
+                // Laisser a Emby le temps de traiter l'actualisation
                 return new Promise(function(resolve) {
                     setTimeout(resolve, 4000);
                 });
             })
             .then(function() {
-                // Recharger les donnees de l'item pour mettre a jour la liste de sous-titres
-                var url = apiClient.getUrl('Items/' + itemId, {
-                    Fields: 'MediaStreams,Path'
-                });
-                return apiClient.getJSON(url);
+                return apiClient.getJSON(apiClient.getUrl('Items/' + itemId, { Fields: 'MediaStreams,Path' }));
             })
             .then(function(updatedItem) {
-                // Mettre a jour la liste de sous-titres dans les selects
-                subtitles = [];
-                var streams = updatedItem.MediaStreams || [];
-                for (var i = 0; i < streams.length; i++) {
-                    var s = streams[i];
-                    if (s.Type === 'Subtitle') {
-                        subtitles.push({
-                            index: s.Index,
-                            language: s.Language || 'und',
-                            codec: s.Codec || '?',
-                            isExternal: s.IsExternal,
-                            isText: s.IsTextSubtitleStream,
-                            title: s.Title || ''
-                        });
-                    }
-                }
-
-                // Mettre a jour les selects
+                subtitles = readSubtitles(updatedItem);
                 updateSubtitleSelects();
-
-                showResult(resultEl, 'success', 'Fusion reussie! ' + mergeData.CueCount + ' sous-titres crees. Liste actualisee!');
-                console.log('[SubMerger] Subtitles reloaded:', subtitles.length);
+                showResult(resultEl, 'success', done + 'Liste actualisee.');
             })
             .catch(function(err) {
                 console.error('[SubMerger] Refresh/reload error:', err);
-                showResult(resultEl, 'success', 'Fusion reussie! ' + mergeData.CueCount + ' sous-titres crees. Rechargez la page pour voir le nouveau sous-titre.');
+                showResult(resultEl, 'success', done + 'Rechargez la page pour voir le nouveau sous-titre.');
             });
     }
 
-    // Mettre a jour les selects de sous-titres apres un reload
+    // La liste a change (un sous-titre en plus) : les choix precedents ne designent plus forcement la meme piste
     function updateSubtitleSelects() {
         var sub1 = document.getElementById('mergeSub1');
         var sub2 = document.getElementById('mergeSub2');
         if (!sub1 || !sub2) return;
 
-        // Sauvegarder les selections actuelles
-        var val1 = sub1.value;
-        var val2 = sub2.value;
-
-        // Regenerer les options
-        var html = '<option value="">-- Choisir --</option>';
-        for (var i = 0; i < subtitles.length; i++) {
-            var s = subtitles[i];
-            var label = '#' + s.index + ' ' + s.language.toUpperCase() + ' (' + s.codec + ')';
-            label += s.isExternal ? ' [EXT]' : ' [INT]';
-            if (!s.isText) label += ' [IMAGE]';
-            html += '<option value="' + s.index + '">' + label + '</option>';
-        }
-
-        sub1.innerHTML = html;
-        sub2.innerHTML = html;
-
-        // Restaurer les selections si possible
-        if (val1) sub1.value = val1;
-        if (val2) sub2.value = val2;
+        sub1.innerHTML = optionsHtml();
+        sub2.innerHTML = optionsHtml();
     }
 
     // Afficher un resultat
@@ -367,7 +415,7 @@
             info: { bg: 'rgba(255,152,0,0.2)', border: '#ff9800' }
         };
         var c = colors[type] || colors.info;
-        el.innerHTML = '<div style="padding: 10px; background: ' + c.bg + '; border-left: 3px solid ' + c.border + '; border-radius: 4px;">' + msg + '</div>';
+        el.innerHTML = '<div style="padding: 10px; background: ' + c.bg + '; border-left: 3px solid ' + c.border + '; border-radius: 4px;">' + escapeHtml(msg) + '</div>';
     }
 
     // Demarrer l'observer quand le DOM est pret
