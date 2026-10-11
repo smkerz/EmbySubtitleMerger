@@ -39,7 +39,7 @@ also translate a track, convert ASS/SSA subtitles to SRT, and tidy up the files 
 - **Batch merge**: create the bilingual subtitle of every video of a folder (a season) or of all libraries
   that has both languages.
 - Clean-up of all libraries.
-- Rename legacy `Movie.dual.srt` files to the current naming, and set aside the ones it cannot identify.
+
 
 ## Installation
 
@@ -98,7 +98,7 @@ EmbySubtitleMerger/
 │       ├── NormalizeNaming.cs         # Naming rules of generated files
 │       ├── BatchMerger.cs             # Track selection for batch merge
 │       ├── NormalizeScheduledTask.cs  # Emby scheduled task
-│       ├── RenameService.cs           # Legacy .dual.srt renaming
+
 │       ├── SettingsService.cs         # Translation settings stored on the server
 │       ├── Jobs.cs                    # Background jobs
 │       ├── ExternalTools.cs           # ffmpeg, ffprobe, mkvpropedit

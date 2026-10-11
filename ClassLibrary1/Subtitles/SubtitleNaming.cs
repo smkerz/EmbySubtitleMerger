@@ -130,7 +130,7 @@ namespace EmbySubtitleMerger.Subtitles
         }
 
         /// <summary>
-        /// Nom du sous-titre bilingue. Sans les deux langues, on garde l'ancien suffixe .dual.srt.
+        /// Nom du sous-titre bilingue. Sans les deux langues (langue non reconnue), il s'appelle Film.dual.srt.
         /// </summary>
         /// <param name="isDefault">Ajoute ".default" : Emby sélectionne alors ce sous-titre de lui-même</param>
         public static string DualFileName(string videoName, LanguageInfo? top, LanguageInfo? bottom, bool isDefault = false)
@@ -192,29 +192,6 @@ namespace EmbySubtitleMerger.Subtitles
         {
             return string.Equals(Path.GetFullPath(a), Path.GetFullPath(b), StringComparison.OrdinalIgnoreCase);
         }
-
-        /// <summary>
-        /// Calcule le nouveau nom d'un ancien .dual.srt en détectant ses deux langues.
-        /// Retourne null si le fichier ne permet pas d'identifier deux langues.
-        /// </summary>
-        public static string? ProposeNameForLegacyDual(string legacyPath, out string detail)
-        {
-            var fileName = Path.GetFileName(legacyPath);
-            var videoName = fileName.Substring(0, fileName.Length - LegacyDualSuffix.Length);
-
-            var pair = LanguageDetector.DetectPair(SrtParser.ParseFile(legacyPath));
-            var top = Resolve(pair.Top);
-            var bottom = Resolve(pair.Bottom);
-
-            if (top == null || bottom == null)
-            {
-                detail = pair.Reason ?? "Langue non prise en charge pour le nommage.";
-                return null;
-            }
-
-            detail = $"{top.NativeName} (haut) + {bottom.NativeName} (bas)";
-            return Path.Combine(Path.GetDirectoryName(legacyPath) ?? ".", DualFileName(videoName, top, bottom));
-        }
     }
 
     /// <summary>
@@ -228,9 +205,6 @@ namespace EmbySubtitleMerger.Subtitles
 
         /// <summary>Score minimal pour retenir une langue</summary>
         private const double MinScore = 15;
-
-        /// <summary>La seconde langue doit peser au moins cette part de la première</summary>
-        private const double MinSecondShare = 0.15;
 
         /// <summary>
         /// Part des mots d'un texte latin que la liste de mots courants reconnaît, environ.
@@ -381,102 +355,9 @@ namespace EmbySubtitleMerger.Subtitles
             return best.Value >= MinScore ? best.Key : null;
         }
 
-        /// <summary>
-        /// Les deux langues d'un sous-titre bilingue, et laquelle est affichée en haut.
-        /// Top et Bottom sont null si deux langues ne se dégagent pas nettement,
-        /// ou si rien n'indique laquelle est en haut ; Reason dit alors pourquoi.
-        /// </summary>
-        public static (string? Top, string? Bottom, string? Reason) DetectPair(IReadOnlyList<SubtitleCue> cues)
-        {
-            var scores = Score(JoinText(cues))
-                .OrderByDescending(s => s.Value)
-                .ToList();
-
-            var found = scores.Count == 0
-                ? "aucune langue reconnue"
-                : string.Join(", ", scores.Take(3).Select(s => $"{s.Key} {s.Value:0}"));
-
-            if (scores.Count < 2
-                || scores[1].Value < MinScore
-                || scores[1].Value < scores[0].Value * MinSecondShare)
-            {
-                return (null, null, $"Une seule langue nette dans ce fichier (scores : {found}).");
-            }
-
-            var first = scores[0].Key;
-            var second = scores[1].Key;
-
-            // Laquelle est en haut ? Deux indices selon le format du fichier :
-            // - une réplique qui mélange les deux langues s'ouvre par celle du haut ;
-            // - une réplique marquée {\an8} s'ouvre par celle du haut.
-            int firstOnTop = 0, secondOnTop = 0;
-
-            foreach (var cue in cues)
-            {
-                var lines = cue.Text.Split('\n')
-                    .Select(l => l.Trim())
-                    .Where(l => l.Length > 0)
-                    .ToArray();
-
-                if (lines.Length == 0) continue;
-
-                var opening = Classify(lines[0], first, second);
-                var closing = Classify(lines[lines.Length - 1], first, second);
-
-                string? top = null;
-                if (opening != null && closing != null && opening != closing)
-                    top = opening;
-                else if (cue.Text.StartsWith(SubtitleMerger.TopPositionTag, StringComparison.Ordinal))
-                    top = opening;
-
-                if (top == first) firstOnTop++;
-                else if (top == second) secondOnTop++;
-            }
-
-            // Sans indice net, on ne devine pas : le renommage est à sens unique
-            if (firstOnTop == secondOnTop)
-            {
-                return (null, null,
-                    $"Deux langues trouvées ({first}, {second}) mais rien n'indique laquelle est en haut (scores : {found}).");
-            }
-
-            return secondOnTop > firstOnTop
-                ? (second, first, null)
-                : (first, second, null);
-        }
-
         private static string JoinText(IEnumerable<SubtitleCue> cues)
         {
             return string.Join("\n", cues.Select(c => c.Text));
-        }
-
-        /// <summary>
-        /// Départage une ligne entre deux langues candidates. Null si la ligne ne tranche pas.
-        /// </summary>
-        private static string? Classify(string line, string languageA, string languageB)
-        {
-            var scores = Score(line);
-
-            // Entre russe et ukrainien, une ligne sans lettre distinctive ne prouve rien :
-            // Score l'attribuerait au russe par défaut
-            if (IsCyrillicPair(languageA, languageB) && scores.Count == 1)
-            {
-                var clean = TagRegex.Replace(line, " ").ToLowerInvariant();
-                if (clean.IndexOfAny(UkrainianLetters) < 0 && clean.IndexOfAny(RussianLetters) < 0)
-                    return null;
-            }
-
-            scores.TryGetValue(languageA, out var a);
-            scores.TryGetValue(languageB, out var b);
-
-            if (a > b) return languageA;
-            if (b > a) return languageB;
-            return null;
-        }
-
-        private static bool IsCyrillicPair(string a, string b)
-        {
-            return (a == "ru" && b == "uk") || (a == "uk" && b == "ru");
         }
     }
 }

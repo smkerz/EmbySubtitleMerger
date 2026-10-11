@@ -1,7 +1,7 @@
 define([], function () {
     'use strict';
 
-    console.log('[SubMerger] Module loaded v9.12.0');
+    console.log('[SubMerger] Module loaded v9.13.0');
 
     var allMovies = [];      // Tous les medias charges
     var filteredMovies = []; // Medias filtres
@@ -1053,99 +1053,6 @@ define([], function () {
 
     // ---------- Renommage des anciens .dual.srt ----------
 
-    function renameLegacyDual(view, dryRun) {
-        var box = view.querySelector('#renameResult');
-        var btnPreview = view.querySelector('#btnRenamePreview');
-        var btnApply = view.querySelector('#btnRenameApply');
-
-        btnPreview.disabled = true;
-        btnApply.disabled = true;
-        box.innerHTML = statusBox('info', dryRun ? 'Analyse des mediatheques...' : 'Renommage en cours...');
-
-        postPlugin('RenameLegacyDual', { DryRun: dryRun })
-        .then(function (data) {
-            btnPreview.disabled = false;
-            btnApply.disabled = false;
-
-            if (!data.Success) {
-                btnApply.style.display = 'none';
-                box.innerHTML = statusBox('error', escapeHtml(data.Error));
-                return;
-            }
-
-            var summary;
-            if (data.Found === 0) {
-                summary = 'Aucun fichier .dual.srt trouve dans ' + data.Folders.length + ' dossier(s) de mediatheque.';
-            } else if (dryRun) {
-                summary = data.Found + ' fichier(s) trouve(s) : ' + data.Renamed + ' a renommer, ' + data.Skipped + ' ignore(s).';
-            } else {
-                summary = data.Renamed + ' fichier(s) renomme(s), ' + data.Skipped + ' ignore(s), ' + data.Errors + ' erreur(s).';
-                if (data.Renamed > 0) {
-                    summary += ' Analyse de la mediatheque demandee.';
-                }
-            }
-
-            var rows = data.Items.map(function (item) {
-                var color = (item.Status === 'Renamed' || item.Status === 'WouldRename') ? '#4CAF50'
-                    : (item.Status === 'Error' ? '#f44336' : '#ff9800');
-                var target = item.NewName ? ' &rarr; <strong>' + escapeHtml(item.NewName) + '</strong>' : '';
-                // Un fichier que le renommage ne sait pas traiter peut etre mis de cote
-                var pick = (item.Status === 'Skipped' && !item.NewName)
-                    ? '<input type="checkbox" class="legacyRemove" data-path="' + escapeHtml(item.OldPath).replace(/"/g, '&quot;') + '" style="margin-right:8px;">'
-                    : '';
-                return '<div style="padding:6px 8px; margin:4px 0; background:rgba(0,0,0,0.3); border-left:3px solid ' + color + '; border-radius:4px; font-size:0.85em;">'
-                    + pick + escapeHtml(item.OldPath) + target
-                    + '<br><span style="color: inherit; opacity: 0.75;">' + escapeHtml(item.Detail) + '</span></div>';
-            }).join('');
-
-            box.innerHTML = statusBox(data.Errors > 0 ? 'warning' : 'ok', '<strong>' + summary + '</strong>') + rows;
-
-            // Le bouton Renommer n'apparait qu'apres un apercu qui a quelque chose a renommer
-            btnApply.style.display = (dryRun && data.Renamed > 0) ? 'inline-block' : 'none';
-            view.querySelector('#btnRenameRemove').style.display = box.querySelector('.legacyRemove') ? 'inline-block' : 'none';
-        })
-        .catch(function (e) {
-            btnPreview.disabled = false;
-            btnApply.disabled = false;
-            console.error('[SubMerger] Rename error:', e);
-            box.innerHTML = statusBox('error', 'Erreur: ' + escapeHtml(e.message));
-        });
-    }
-
-    // Met de cote les anciens bilingues coches dans l'apercu du renommage
-    function removeLegacyDual(view) {
-        var box = view.querySelector('#renameResult');
-        var paths = Array.prototype.map.call(box.querySelectorAll('.legacyRemove:checked'), function (input) {
-            return input.dataset.path;
-        });
-
-        if (paths.length === 0) {
-            box.insertAdjacentHTML('afterbegin', statusBox('warning', 'Cochez d\'abord les fichiers a mettre de cote.'));
-            return;
-        }
-
-        postPlugin('RemoveLegacyDual', { Paths: paths })
-        .then(function (data) {
-            if (!data.Success) {
-                box.innerHTML = statusBox('error', escapeHtml(data.Error));
-                return;
-            }
-
-            var problems = data.Problems.map(function (item) {
-                return '<br>' + escapeHtml(item.OldPath) + ' : ' + escapeHtml(item.Detail);
-            }).join('');
-
-            view.querySelector('#btnRenameRemove').style.display = 'none';
-            box.innerHTML = statusBox(data.Problems.length > 0 ? 'warning' : 'ok',
-                '<strong>' + data.Moved + ' fichier(s) deplace(s) dans le dossier _anciens_dual de leur mediatheque.</strong>'
-                + (data.Moved > 0 ? ' Analyse de la mediatheque demandee.' : '') + problems);
-        })
-        .catch(function (e) {
-            console.error('[SubMerger] Remove legacy error:', e);
-            box.innerHTML = statusBox('error', 'Erreur: ' + escapeHtml(e.message));
-        });
-    }
-
     // ---------- Normalisation (ASS/SSA vers SRT) ----------
 
     // Signale les programmes manquants sur le serveur. L'avertissement disparait
@@ -1507,8 +1414,6 @@ define([], function () {
         on('#btnTranslate', 'click', function () { doTranslate(view); });
         on('#btnCancelTranslate', 'click', function () { cancelTranslation(view); });
 
-        on('#btnRenamePreview', 'click', function () { renameLegacyDual(view, true); });
-        on('#btnRenameApply', 'click', function () { renameLegacyDual(view, false); });
 
         on('#btnNormalizePreview', 'click', function () { startNormalize(view, true, false); });
         on('#btnNormalizeApply', 'click', function () { startNormalize(view, false, false); });
@@ -1529,7 +1434,6 @@ define([], function () {
         view.querySelector('#batchLang2').value = 'fr';
         on('#btnLibCancel', 'click', function () { cancelNormalize(); });
         on('#btnMergeCancel', 'click', function () { cancelMerge(); });
-        on('#btnRenameRemove', 'click', function () { removeLegacyDual(view); });
         on('#translateEngine', 'change', function () { showTranslateEngine(view); });
 
         ['#normalizeScope', '#normalizeLanguages', '#normalizeAnnotate', '#normalizeTagMkv', '#normalizeExtract', '#normalizeOverwrite',
@@ -1555,7 +1459,7 @@ define([], function () {
     }
 
     return function (view) {
-        console.log('[SubMerger] Controller init v9.12.0');
+        console.log('[SubMerger] Controller init v9.13.0');
 
         var bound = false;
 

@@ -10,7 +10,7 @@
          data-controller="configurationpage?name=subtitlemerger.js">
         <div data-role="content">
             <div class="content-primary">
-                <h1>Subtitle Merger <span style="font-size:0.5em; color:#888;">v9.12.0</span></h1>
+                <h1>Subtitle Merger <span style="font-size:0.5em; color:#888;">v9.13.0</span></h1>
 
                 <style>
                     .merger-card { background: rgba(0,0,0,0.2); border-radius: 8px; padding: 15px; margin-bottom: 15px; }
@@ -512,29 +512,6 @@
                             </div>
                         </div>
                         <div id="libResult" class="merger-result"></div>
-                    </div>
-
-                    <div class="merger-card">
-                        <h3>Renommer les anciens sous-titres bilingues</h3>
-                        <p class="merger-help">
-                            Les fusions s'appelaient auparavant <em>Film.dual.srt</em> et s'affichaient "(SRT) dual" dans le lecteur.
-                            Cet outil parcourt toutes les mediatheques, detecte les deux langues de chaque fichier et le renomme,
-                            par exemple en <em>Film.Fran&ccedil;ais + English.fr.srt</em>.
-                            Un fichier qu'il ne sait pas renommer (une seule langue reconnue, par exemple) peut etre coche puis mis de cote :
-                            il est deplace dans un dossier <em>_anciens_dual</em> a la racine de sa mediatheque, jamais supprime.
-                        </p>
-                        <div class="merger-actions" style="margin-top:0;">
-                            <button id="btnRenamePreview" type="button" is="emby-button" class="raised">
-                                <span>Apercu (ne modifie rien)</span>
-                            </button>
-                            <button id="btnRenameApply" type="button" is="emby-button" class="raised button-submit" style="display:none;">
-                                <span>Renommer</span>
-                            </button>
-                            <button id="btnRenameRemove" type="button" is="emby-button" class="raised" style="display:none;">
-                                <span>Mettre de cote les fichiers coches</span>
-                            </button>
-                        </div>
-                        <div id="renameResult" class="merger-result"></div>
                     </div>
                 </div>
             </div>
