@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Threading.Tasks;
+using MediaBrowser.Controller.Net;
 using MediaBrowser.Model.Services;
 
 namespace EmbySubtitleMerger.Subtitles
@@ -12,6 +13,7 @@ namespace EmbySubtitleMerger.Subtitles
     /// prend plusieurs minutes et ne tient pas dans une requête HTTP.
     /// </summary>
     [Route("/EmbySubtitleMerger/Translate", "POST")]
+    [Authenticated(Roles = "Admin")]
     public class TranslateSubtitleRequest : IReturn<TranslateSubtitleResponse>
     {
         /// <summary>Chemin du fichier vidéo</summary>
@@ -44,6 +46,9 @@ namespace EmbySubtitleMerger.Subtitles
         /// <summary>Nombre de répliques par appel API (1 à 100)</summary>
         public int? BatchSize { get; set; }
 
+        /// <summary>Remplacer le sous-titre "Film.xx.srt" s'il existe déjà. Sinon la traduction est refusée</summary>
+        public bool Overwrite { get; set; } = false;
+
         /// <summary>Enchaîner une fusion traduction + source pour produire un sous-titre bilingue</summary>
         public bool ThenMerge { get; set; } = false;
 
@@ -75,6 +80,7 @@ namespace EmbySubtitleMerger.Subtitles
     /// Suivi de progression d'un job de traduction
     /// </summary>
     [Route("/EmbySubtitleMerger/TranslateStatus", "GET")]
+    [Authenticated(Roles = "Admin")]
     public class TranslateStatusRequest : IReturn<TranslateStatusResponse>
     {
         public string? JobId { get; set; }
@@ -100,6 +106,7 @@ namespace EmbySubtitleMerger.Subtitles
     /// Annulation d'un job en cours
     /// </summary>
     [Route("/EmbySubtitleMerger/TranslateCancel", "POST")]
+    [Authenticated(Roles = "Admin")]
     public class TranslateCancelRequest : IReturn<TranslateCancelResponse>
     {
         public string? JobId { get; set; }
@@ -149,6 +156,10 @@ namespace EmbySubtitleMerger.Subtitles
                 var outputPath = SubtitleNaming.SinglePath(request.VideoPath, target);
                 if (request.SourceIsExternal && SubtitleNaming.SamePath(outputPath, request.SourcePath ?? string.Empty))
                     return Fail("La traduction écraserait le sous-titre source.");
+
+                // Un Film.fr.srt déjà là peut être un vrai sous-titre : on ne le remplace que sur demande
+                if (File.Exists(outputPath) && !request.Overwrite)
+                    return Fail($"{Path.GetFileName(outputPath)} existe déjà. Cochez « Remplacer le sous-titre existant » pour l'écraser.");
 
                 var batchSize = Math.Clamp(
                     request.BatchSize ?? config?.TranslationBatchSize ?? SubtitleTranslator.DefaultBatchSize, 1, 100);

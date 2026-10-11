@@ -1,6 +1,10 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
+using System.Security.Cryptography;
+using System.Text;
+using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -82,6 +86,76 @@ namespace EmbySubtitleMerger.Subtitles
     }
 
     /// <summary>
+    /// Répliques déjà traduites d'une traduction en cours, gardées sur disque après chaque lot.
+    /// Une traduction interrompue (erreur, annulation, redémarrage) reprend là où elle s'était arrêtée
+    /// au lieu de tout refaire. Le fichier est lié au texte source, à la langue cible et au moteur.
+    /// </summary>
+    public sealed class TranslationCheckpoint
+    {
+        private static readonly TimeSpan Retention = TimeSpan.FromDays(7);
+
+        private readonly string _path;
+
+        /// <summary>Traductions acquises, par position de la réplique</summary>
+        public Dictionary<int, string> Done { get; private set; } = new Dictionary<int, string>();
+
+        private TranslationCheckpoint(string path)
+        {
+            _path = path;
+        }
+
+        public static TranslationCheckpoint Open(IReadOnlyList<SubtitleCue> cues, string targetLanguage, string engineName)
+        {
+            var folder = Path.Combine(Path.GetTempPath(), "EmbySubtitleMerger");
+            Directory.CreateDirectory(folder);
+            PurgeOld(folder);
+
+            var signature = engineName + "|" + targetLanguage + "|" + string.Join("\n", cues.Select(c => c.Text));
+            var hash = Convert.ToHexString(SHA1.HashData(Encoding.UTF8.GetBytes(signature)));
+
+            var checkpoint = new TranslationCheckpoint(Path.Combine(folder, $"traduction-{hash}.json"));
+            try
+            {
+                if (File.Exists(checkpoint._path))
+                {
+                    var saved = JsonSerializer.Deserialize<Dictionary<int, string>>(File.ReadAllText(checkpoint._path));
+                    if (saved != null)
+                        checkpoint.Done = saved.Where(e => e.Key >= 0 && e.Key < cues.Count).ToDictionary(e => e.Key, e => e.Value);
+                }
+            }
+            catch
+            {
+                // Fichier abîmé : on repart de zéro
+            }
+
+            return checkpoint;
+        }
+
+        public void Save()
+        {
+            try { File.WriteAllText(_path, JsonSerializer.Serialize(Done)); } catch { }
+        }
+
+        public void Delete()
+        {
+            try { File.Delete(_path); } catch { }
+        }
+
+        private static void PurgeOld(string folder)
+        {
+            try
+            {
+                foreach (var file in Directory.EnumerateFiles(folder, "traduction-*.json"))
+                {
+                    if (DateTime.UtcNow - File.GetLastWriteTimeUtc(file) > Retention)
+                        File.Delete(file);
+                }
+            }
+            catch { }
+        }
+    }
+
+    /// <summary>
     /// Traduit un fichier SRT complet avec le moteur choisi.
     ///
     /// Le point délicat est l'alignement : une traduction naïve fusionne ou découpe
@@ -105,7 +179,8 @@ namespace EmbySubtitleMerger.Subtitles
             ITranslationEngine engine,
             int batchSize = DefaultBatchSize,
             TranslationJob? job = null,
-            CancellationToken cancellationToken = default)
+            CancellationToken cancellationToken = default,
+            TranslationCheckpoint? checkpoint = null)
         {
             if (cues == null) throw new ArgumentNullException(nameof(cues));
 
@@ -121,10 +196,19 @@ namespace EmbySubtitleMerger.Subtitles
             if (translated.Count == 0)
                 return translated;
 
+            // Répliques acquises lors d'une tentative précédente
+            var alreadyDone = checkpoint?.Done ?? new Dictionary<int, string>();
+            foreach (var entry in alreadyDone)
+                translated[entry.Key].Text = entry.Value;
+
             // Id = position dans la liste, stable et indépendant de l'index SRT d'origine
             var items = translated
                 .Select((c, i) => new TranslationItem { Id = i, Text = c.Text })
+                .Where(item => !alreadyDone.ContainsKey(item.Id))
                 .ToList();
+
+            var doneBefore = translated.Count - items.Count;
+            if (job != null) job.Processed = doneBefore;
 
             var previousBatchTranslations = new List<TranslationItem>();
 
@@ -176,6 +260,7 @@ namespace EmbySubtitleMerger.Subtitles
                     {
                         translated[item.Id].Text = text;
                         appliedContext.Add(new TranslationItem { Id = item.Id, Text = text });
+                        if (checkpoint != null) checkpoint.Done[item.Id] = text;
                     }
                     else
                     {
@@ -187,10 +272,11 @@ namespace EmbySubtitleMerger.Subtitles
                 }
 
                 previousBatchTranslations = appliedContext;
+                checkpoint?.Save();
 
                 if (job != null)
                 {
-                    job.Processed = offset + batch.Count;
+                    job.Processed = doneBefore + offset + batch.Count;
                     job.Message = $"Traduction en cours… {job.Processed}/{job.Total} répliques";
                 }
             }
@@ -228,13 +314,17 @@ namespace EmbySubtitleMerger.Subtitles
                 if (cues.Count == 0)
                     throw new InvalidOperationException("Le sous-titre source ne contient aucune réplique.");
 
-                job.Message = $"Traduction de {cues.Count} répliques…";
+                var checkpoint = TranslationCheckpoint.Open(cues, targetLanguage, engineName);
+                job.Message = checkpoint.Done.Count > 0
+                    ? $"Reprise : {checkpoint.Done.Count} répliques sur {cues.Count} déjà traduites…"
+                    : $"Traduction de {cues.Count} répliques…";
 
                 using var engine = TranslationEngines.Create(engineName, apiKey, model, sourceLanguage, targetLanguage);
 
-                var translated = await TranslateCuesAsync(cues, engine, batchSize, job, job.Cancellation.Token);
+                var translated = await TranslateCuesAsync(cues, engine, batchSize, job, job.Cancellation.Token, checkpoint);
 
                 SrtParser.WriteFile(outputPath, translated);
+                checkpoint.Delete();
 
                 job.OutputPath = outputPath;
                 job.Message = job.Untranslated > 0
@@ -259,6 +349,8 @@ namespace EmbySubtitleMerger.Subtitles
                 job.Status = JobStatus.Failed;
                 job.Error = ex.Message;
                 job.Message = "Échec de la traduction.";
+                if (job.Processed > 0)
+                    job.Error += $" Les {job.Processed} répliques déjà traduites sont gardées : relancez la traduction pour reprendre.";
                 Plugin.Log($"[Translate] ERREUR: {ex}");
             }
             finally

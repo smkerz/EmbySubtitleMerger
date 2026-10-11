@@ -132,12 +132,13 @@ namespace EmbySubtitleMerger.Subtitles
         /// <summary>
         /// Nom du sous-titre bilingue. Sans les deux langues, on garde l'ancien suffixe .dual.srt.
         /// </summary>
-        public static string DualFileName(string videoName, LanguageInfo? top, LanguageInfo? bottom)
+        /// <param name="isDefault">Ajoute ".default" : Emby sélectionne alors ce sous-titre de lui-même</param>
+        public static string DualFileName(string videoName, LanguageInfo? top, LanguageInfo? bottom, bool isDefault = false)
         {
             if (top == null || bottom == null || top.Code == bottom.Code)
                 return videoName + LegacyDualSuffix;
 
-            return $"{videoName}.{top.NativeName} + {bottom.NativeName}.{top.Code}.srt";
+            return $"{videoName}.{top.NativeName} + {bottom.NativeName}.{top.Code}{(isDefault ? ".default" : string.Empty)}.srt";
         }
 
         /// <summary>
@@ -150,8 +151,10 @@ namespace EmbySubtitleMerger.Subtitles
 
             if (fileName.Equals(videoName + LegacyDualSuffix, StringComparison.OrdinalIgnoreCase)) return true;
 
-            // "Français + English.fr.srt"
+            // "Français + English.fr.srt" ou "Français + English.fr.default.srt"
             var parts = fileName.Substring(videoName.Length + 1).Split('.');
+            if (parts.Length == 4 && parts[2] == "default")
+                parts = new[] { parts[0], parts[1], parts[3] };
             if (parts.Length != 3 || !parts[2].Equals("srt", StringComparison.OrdinalIgnoreCase)) return false;
 
             var names = parts[0].Split(new[] { " + " }, StringSplitOptions.None);
@@ -165,11 +168,11 @@ namespace EmbySubtitleMerger.Subtitles
         /// <summary>
         /// Chemin du sous-titre bilingue d'une vidéo, à côté de celle-ci
         /// </summary>
-        public static string DualPath(string videoPath, LanguageInfo? top, LanguageInfo? bottom)
+        public static string DualPath(string videoPath, LanguageInfo? top, LanguageInfo? bottom, bool isDefault = false)
         {
             return Path.Combine(
                 Path.GetDirectoryName(videoPath) ?? ".",
-                DualFileName(Path.GetFileNameWithoutExtension(videoPath), top, bottom));
+                DualFileName(Path.GetFileNameWithoutExtension(videoPath), top, bottom, isDefault));
         }
 
         /// <summary>

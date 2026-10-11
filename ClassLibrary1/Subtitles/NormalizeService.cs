@@ -4,6 +4,7 @@ using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
 using MediaBrowser.Controller.Library;
+using MediaBrowser.Controller.Net;
 using MediaBrowser.Model.Services;
 
 namespace EmbySubtitleMerger.Subtitles
@@ -27,6 +28,7 @@ namespace EmbySubtitleMerger.Subtitles
     /// Programmes externes disponibles sur le serveur
     /// </summary>
     [Route("/EmbySubtitleMerger/Tools", "GET")]
+    [Authenticated(Roles = "Admin")]
     public class GetToolsRequest : IReturn<ToolsResponse>
     {
     }
@@ -44,6 +46,7 @@ namespace EmbySubtitleMerger.Subtitles
     /// Lance la normalisation des sous-titres (conversion des ASS/SSA en SRT), en tâche de fond.
     /// </summary>
     [Route("/EmbySubtitleMerger/Normalize", "POST")]
+    [Authenticated(Roles = "Admin")]
     public class NormalizeRequest : IReturn<NormalizeResponse>
     {
         /// <summary>true (défaut) = aperçu, rien n'est modifié</summary>
@@ -93,6 +96,7 @@ namespace EmbySubtitleMerger.Subtitles
     }
 
     [Route("/EmbySubtitleMerger/NormalizeStatus", "GET")]
+    [Authenticated(Roles = "Admin")]
     public class NormalizeStatusRequest : IReturn<NormalizeStatusResponse>
     {
         public string? JobId { get; set; }
@@ -125,6 +129,7 @@ namespace EmbySubtitleMerger.Subtitles
     }
 
     [Route("/EmbySubtitleMerger/NormalizeCancel", "POST")]
+    [Authenticated(Roles = "Admin")]
     public class NormalizeCancelRequest : IReturn<NormalizeCancelResponse>
     {
         public string? JobId { get; set; }

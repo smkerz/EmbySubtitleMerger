@@ -1,7 +1,7 @@
 define([], function () {
     'use strict';
 
-    console.log('[SubMerger] Module loaded v9.10.0');
+    console.log('[SubMerger] Module loaded v9.11.0');
 
     var allMovies = [];      // Tous les medias charges
     var filteredMovies = []; // Medias filtres
@@ -775,6 +775,7 @@ define([], function () {
             Offset1Ms: parseInt(view.querySelector('#offset1').value) || 0,
             Offset2Ms: parseInt(view.querySelector('#offset2').value) || 0,
             Layout: view.querySelector('#layout').value,
+            MarkDefault: view.querySelector('#mergeDefault').checked,
             UseCloudApi: useCloudApi,
             DoubleSubApiKey: doublesubApiKey,
             Background: true
@@ -901,6 +902,7 @@ define([], function () {
             SourceLanguage: selected.dataset.lang || '',
             TargetLanguage: view.querySelector('#targetLanguage').value,
             Engine: engine,
+            Overwrite: view.querySelector('#translateOverwrite').checked,
             AnthropicApiKey: anthropicKey,
             ThenMerge: view.querySelector('#translateThenMerge').checked,
             MergeMode: view.querySelector('#mergeMode').value,
@@ -1042,8 +1044,12 @@ define([], function () {
                 var color = (item.Status === 'Renamed' || item.Status === 'WouldRename') ? '#4CAF50'
                     : (item.Status === 'Error' ? '#f44336' : '#ff9800');
                 var target = item.NewName ? ' &rarr; <strong>' + escapeHtml(item.NewName) + '</strong>' : '';
+                // Un fichier que le renommage ne sait pas traiter peut etre mis de cote
+                var pick = (item.Status === 'Skipped' && !item.NewName)
+                    ? '<input type="checkbox" class="legacyRemove" data-path="' + escapeHtml(item.OldPath).replace(/"/g, '&quot;') + '" style="margin-right:8px;">'
+                    : '';
                 return '<div style="padding:6px 8px; margin:4px 0; background:rgba(0,0,0,0.3); border-left:3px solid ' + color + '; border-radius:4px; font-size:0.85em;">'
-                    + escapeHtml(item.OldPath) + target
+                    + pick + escapeHtml(item.OldPath) + target
                     + '<br><span style="color: inherit; opacity: 0.75;">' + escapeHtml(item.Detail) + '</span></div>';
             }).join('');
 
@@ -1051,11 +1057,46 @@ define([], function () {
 
             // Le bouton Renommer n'apparait qu'apres un apercu qui a quelque chose a renommer
             btnApply.style.display = (dryRun && data.Renamed > 0) ? 'inline-block' : 'none';
+            view.querySelector('#btnRenameRemove').style.display = box.querySelector('.legacyRemove') ? 'inline-block' : 'none';
         })
         .catch(function (e) {
             btnPreview.disabled = false;
             btnApply.disabled = false;
             console.error('[SubMerger] Rename error:', e);
+            box.innerHTML = statusBox('error', 'Erreur: ' + escapeHtml(e.message));
+        });
+    }
+
+    // Met de cote les anciens bilingues coches dans l'apercu du renommage
+    function removeLegacyDual(view) {
+        var box = view.querySelector('#renameResult');
+        var paths = Array.prototype.map.call(box.querySelectorAll('.legacyRemove:checked'), function (input) {
+            return input.dataset.path;
+        });
+
+        if (paths.length === 0) {
+            box.insertAdjacentHTML('afterbegin', statusBox('warning', 'Cochez d\'abord les fichiers a mettre de cote.'));
+            return;
+        }
+
+        postPlugin('RemoveLegacyDual', { Paths: paths })
+        .then(function (data) {
+            if (!data.Success) {
+                box.innerHTML = statusBox('error', escapeHtml(data.Error));
+                return;
+            }
+
+            var problems = data.Problems.map(function (item) {
+                return '<br>' + escapeHtml(item.OldPath) + ' : ' + escapeHtml(item.Detail);
+            }).join('');
+
+            view.querySelector('#btnRenameRemove').style.display = 'none';
+            box.innerHTML = statusBox(data.Problems.length > 0 ? 'warning' : 'ok',
+                '<strong>' + data.Moved + ' fichier(s) deplace(s) dans le dossier _anciens_dual de leur mediatheque.</strong>'
+                + (data.Moved > 0 ? ' Analyse de la mediatheque demandee.' : '') + problems);
+        })
+        .catch(function (e) {
+            console.error('[SubMerger] Remove legacy error:', e);
             box.innerHTML = statusBox('error', 'Erreur: ' + escapeHtml(e.message));
         });
     }
@@ -1400,6 +1441,7 @@ define([], function () {
         on('#btnLibCleanupApply', 'click', function () { startNormalize(view, false, true, true); });
         on('#btnLibCancel', 'click', function () { cancelNormalize(); });
         on('#btnMergeCancel', 'click', function () { cancelMerge(); });
+        on('#btnRenameRemove', 'click', function () { removeLegacyDual(view); });
         on('#translateEngine', 'change', function () { showTranslateEngine(view); });
 
         ['#normalizeScope', '#normalizeLanguages', '#normalizeAnnotate', '#normalizeTagMkv', '#normalizeExtract', '#normalizeOverwrite',
@@ -1424,7 +1466,7 @@ define([], function () {
     }
 
     return function (view) {
-        console.log('[SubMerger] Controller init v9.10.0');
+        console.log('[SubMerger] Controller init v9.11.0');
 
         var bound = false;
 

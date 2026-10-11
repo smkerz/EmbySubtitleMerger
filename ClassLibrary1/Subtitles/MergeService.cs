@@ -5,6 +5,7 @@ using System.Text;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
+using MediaBrowser.Controller.Net;
 using MediaBrowser.Model.Services;
 
 namespace EmbySubtitleMerger.Subtitles
@@ -13,6 +14,7 @@ namespace EmbySubtitleMerger.Subtitles
     /// Requête pour fusionner des sous-titres
     /// </summary>
     [Route("/EmbySubtitleMerger/Merge", "POST")]
+    [Authenticated(Roles = "Admin")]
     public class MergeSubtitlesRequest : IReturn<MergeSubtitlesResponse>
     {
         /// <summary>Chemin du fichier vidéo</summary>
@@ -75,12 +77,19 @@ namespace EmbySubtitleMerger.Subtitles
         /// dure plusieurs minutes : une requête aussi longue est coupée par un proxy ou le navigateur.
         /// </summary>
         public bool Background { get; set; } = false;
+
+        /// <summary>
+        /// Marquer le bilingue "default" dans son nom : Emby le sélectionne alors de lui-même,
+        /// selon les réglages de lecture de l'utilisateur.
+        /// </summary>
+        public bool MarkDefault { get; set; } = false;
     }
 
     /// <summary>
     /// Requête de suivi d'une fusion lancée en tâche de fond
     /// </summary>
     [Route("/EmbySubtitleMerger/MergeStatus", "GET")]
+    [Authenticated(Roles = "Admin")]
     public class GetMergeStatusRequest : IReturn<MergeSubtitlesResponse>
     {
         public string? JobId { get; set; }
@@ -90,6 +99,7 @@ namespace EmbySubtitleMerger.Subtitles
     /// Arrête une fusion en cours (l'extraction des pistes d'un gros film dure plusieurs minutes)
     /// </summary>
     [Route("/EmbySubtitleMerger/MergeCancel", "POST")]
+    [Authenticated(Roles = "Admin")]
     public class CancelMergeRequest : IReturn<MergeSubtitlesResponse>
     {
         public string? JobId { get; set; }
@@ -128,6 +138,7 @@ namespace EmbySubtitleMerger.Subtitles
     /// Requête pour vérifier le statut de FFmpeg
     /// </summary>
     [Route("/EmbySubtitleMerger/Status", "GET")]
+    [Authenticated(Roles = "Admin")]
     public class GetStatusRequest : IReturn<StatusResponse>
     {
     }
@@ -142,25 +153,6 @@ namespace EmbySubtitleMerger.Subtitles
         public string? PluginVersion { get; set; }
         public bool CloudApiAvailable { get; set; }
         public string? CloudApiUrl { get; set; }
-    }
-    
-    /// <summary>
-    /// Requête pour obtenir les infos d'un film
-    /// </summary>
-    [Route("/EmbySubtitleMerger/MovieInfo", "GET")]
-    public class GetMovieInfoRequest : IReturn<string>
-    {
-        public string? ItemId { get; set; }
-    }
-
-    /// <summary>
-    /// Page popup de fusion rapide pour un film
-    /// </summary>
-    [Route("/EmbySubtitleMerger/QuickMerge", "GET")]
-    [Route("/EmbySubtitleMerger/QuickMerge.html", "GET")]
-    public class QuickMergePageRequest : IReturn<string>
-    {
-        public string? ItemId { get; set; }
     }
     
     /// <summary>
@@ -194,89 +186,6 @@ namespace EmbySubtitleMerger.Subtitles
                 CloudApiAvailable = cloudApiAvailable,
                 CloudApiUrl = DoubleSubApiClient.DefaultApiUrl
             };
-        }
-        
-        /// <summary>
-        /// Obtient les infos d'un film avec ses sous-titres
-        /// </summary>
-        public async Task<object> Get(GetMovieInfoRequest request)
-        {
-            try
-            {
-                if (string.IsNullOrEmpty(request.ItemId))
-                {
-                    return CreateHtmlResponse("<p style='color:red'>ItemId requis</p>");
-                }
-                
-                var apiKey = "a482e26698584ef8a83d6ff49c0d8676";
-                var userId = "e69b7a5d73a943b4918712599f79905e";
-                var url = $"http://localhost:8096/emby/Users/{userId}/Items/{request.ItemId}?Fields=MediaStreams,Path&api_key={apiKey}";
-                
-                using var client = new System.Net.Http.HttpClient { Timeout = TimeSpan.FromSeconds(10) };
-                var json = await client.GetStringAsync(url);
-                var doc = JsonDocument.Parse(json);
-                var root = doc.RootElement;
-                
-                var name = root.TryGetProperty("Name", out var n) ? n.GetString() : "?";
-                var path = root.TryGetProperty("Path", out var p) ? p.GetString() : "";
-                
-                var html = new StringBuilder();
-                html.Append($"<h3 style='color:#00a4dc;margin:0 0 10px 0;'>{WebUtility.HtmlEncode(name)}</h3>");
-                html.Append($"<p style='color:#888;font-size:0.9em;margin:0 0 15px 0;'>{WebUtility.HtmlEncode(Path.GetFileName(path))}</p>");
-                
-                if (root.TryGetProperty("MediaStreams", out var streams))
-                {
-                    html.Append("<div style='margin-top:10px;'>");
-                    html.Append("<strong style='color:#9fb0c2;'>Sous-titres disponibles:</strong><br><br>");
-                    
-                    int subCount = 0;
-                    foreach (var stream in streams.EnumerateArray())
-                    {
-                        var type = stream.TryGetProperty("Type", out var t) ? t.GetString() : "";
-                        if (type != "Subtitle") continue;
-                        
-                        subCount++;
-                        var index = stream.TryGetProperty("Index", out var idx) ? idx.GetInt32() : -1;
-                        var lang = stream.TryGetProperty("Language", out var l) ? l.GetString() : "und";
-                        var codec = stream.TryGetProperty("Codec", out var c) ? c.GetString() : "?";
-                        var isExt = stream.TryGetProperty("IsExternal", out var e) && e.GetBoolean();
-                        var isText = stream.TryGetProperty("IsTextSubtitleStream", out var txt) && txt.GetBoolean();
-                        var title = stream.TryGetProperty("Title", out var ti) ? ti.GetString() : "";
-                        
-                        var color = isText ? "#4CAF50" : "#ff9800";
-                        var typeLabel = isText ? "TXT" : "IMG";
-                        var extLabel = isExt ? "[EXT]" : "[INT]";
-                        
-                        html.Append($"<div style='padding:8px;margin:5px 0;background:rgba(0,0,0,0.3);border-radius:5px;border-left:3px solid {color};'>");
-                        html.Append($"<input type='checkbox' class='sub-check' data-index='{index}' data-text='{isText}' style='margin-right:8px;'>");
-                        html.Append($"<span style='color:{color};font-weight:bold;'>{typeLabel}</span> ");
-                        html.Append($"<span style='color:#888;'>{extLabel}</span> ");
-                        html.Append($"<span style='color:#e6eaf0;'>#{index} {lang?.ToUpper()} ({codec})</span>");
-                        if (!string.IsNullOrEmpty(title))
-                            html.Append($" <span style='color:#666;'>- {WebUtility.HtmlEncode(title)}</span>");
-                        if (!isText)
-                            html.Append($" <span style='color:#ff9800;font-size:0.8em;'>(nécessite OCR)</span>");
-                        html.Append("</div>");
-                    }
-                    
-                    if (subCount == 0)
-                    {
-                        html.Append("<p style='color:#ff6b6b;'>Aucun sous-titre trouvé dans ce fichier.</p>");
-                    }
-                    else
-                    {
-                        html.Append($"<p style='color:#888;margin-top:15px;font-size:0.9em;'>{subCount} sous-titre(s) trouvé(s). Cochez 2 sous-titres texte (TXT) pour la fusion.</p>");
-                    }
-                    
-                    html.Append("</div>");
-                }
-                
-                return CreateHtmlResponse(html.ToString());
-            }
-            catch (Exception ex)
-            {
-                return CreateHtmlResponse($"<p style='color:red'>Erreur: {WebUtility.HtmlEncode(ex.Message)}</p>");
-            }
         }
         
         /// <summary>
@@ -351,7 +260,7 @@ namespace EmbySubtitleMerger.Subtitles
                     // Le nom du fichier porte les deux langues : c'est ce qu'Emby affiche dans le lecteur
                     var language1 = SubtitleNaming.ResolveOrDetect(request.Language1, source1.Path);
                     var language2 = SubtitleNaming.ResolveOrDetect(request.Language2, source2.Path);
-                    var outputPath = SubtitleNaming.DualPath(request.VideoPath, language1, language2);
+                    var outputPath = SubtitleNaming.DualPath(request.VideoPath, language1, language2, request.MarkDefault);
 
                     if (SubtitleNaming.SamePath(outputPath, source1.Path) || SubtitleNaming.SamePath(outputPath, source2.Path))
                         return Fail("Le fichier produit écraserait l'un des deux sous-titres choisis. Choisissez deux autres pistes.");
@@ -361,10 +270,12 @@ namespace EmbySubtitleMerger.Subtitles
                         if (string.IsNullOrEmpty(request.DoubleSubApiKey))
                             return Fail("Cle API DoubleSub.io requise pour le mode cloud. Obtenez-en une sur doublesub.io/api/v1/docs");
 
-                        return await MergeViaCloudApiAsync(source1.Path, source2.Path, outputPath, request);
+                        return RemoveReplacedDuals(
+                            await MergeViaCloudApiAsync(source1.Path, source2.Path, outputPath, request), request, language1, language2, source1, source2);
                     }
 
-                    return MergeLocally(source1.Path, source2.Path, outputPath, request);
+                    return RemoveReplacedDuals(
+                        MergeLocally(source1.Path, source2.Path, outputPath, request), request, language1, language2, source1, source2);
                 }
                 finally
                 {
@@ -381,6 +292,48 @@ namespace EmbySubtitleMerger.Subtitles
             {
                 return Fail(ex.Message);
             }
+        }
+
+        /// <summary>
+        /// Après une fusion réussie, retire les bilingues qu'elle remplace : l'ancien Film.dual.srt,
+        /// et le même bilingue sous l'autre forme (avec ou sans "default"). Sans cela, Emby les listerait en double.
+        /// </summary>
+        private static MergeSubtitlesResponse RemoveReplacedDuals(
+            MergeSubtitlesResponse result,
+            MergeSubtitlesRequest request,
+            LanguageInfo? language1,
+            LanguageInfo? language2,
+            SubtitleSource source1,
+            SubtitleSource source2)
+        {
+            if (!result.Success || result.OutputPath == null) return result;
+
+            var replaced = new[]
+            {
+                SubtitleNaming.DualPath(request.VideoPath!, null, null),
+                SubtitleNaming.DualPath(request.VideoPath!, language1, language2, !request.MarkDefault)
+            };
+
+            foreach (var path in replaced)
+            {
+                if (SubtitleNaming.SamePath(path, result.OutputPath) || !File.Exists(path)
+                    || SubtitleNaming.SamePath(path, source1.Path) || SubtitleNaming.SamePath(path, source2.Path))
+                {
+                    continue;
+                }
+
+                try
+                {
+                    File.Delete(path);
+                    result.Message += $" Ancien bilingue remplacé : {Path.GetFileName(path)}.";
+                }
+                catch (Exception ex)
+                {
+                    Plugin.Log($"[Merge] Ancien bilingue non retiré ({path}): {ex.Message}");
+                }
+            }
+
+            return result;
         }
 
         private static MergeSubtitlesResponse Fail(string error)
@@ -478,276 +431,5 @@ namespace EmbySubtitleMerger.Subtitles
                 cue.EndTime = cue.EndTime.Add(offset);
             }
         }
-        
-        private static string CreateHtmlResponse(string content)
-        {
-            return $"<html><head><meta charset='utf-8'></head><body style='margin:0;padding:10px;background:transparent;font-family:system-ui;color:#e6eaf0;'>{content}</body></html>";
-        }
-    }
-
-    /// <summary>
-    /// Service pour la page de fusion rapide
-    /// </summary>
-    public class QuickMergePageService : IService
-    {
-        public async Task<object> Get(QuickMergePageRequest request)
-        {
-            try
-            {
-                var itemId = request?.ItemId;
-                if (string.IsNullOrEmpty(itemId))
-                {
-                    return GenerateQuickMergePage(null, null, new List<SubtitleInfo>());
-                }
-
-                var apiKey = "a482e26698584ef8a83d6ff49c0d8676";
-                var url = $"http://localhost:8096/emby/Items/{itemId}?Fields=MediaStreams,Path&api_key={apiKey}";
-
-                using var client = new System.Net.Http.HttpClient { Timeout = TimeSpan.FromSeconds(10) };
-                var json = await client.GetStringAsync(url);
-                var doc = JsonDocument.Parse(json);
-                var root = doc.RootElement;
-
-                var name = root.TryGetProperty("Name", out var n) ? n.GetString() : "Film";
-                var path = root.TryGetProperty("Path", out var p) ? p.GetString() : "";
-
-                var subtitles = new List<SubtitleInfo>();
-                if (root.TryGetProperty("MediaStreams", out var streams))
-                {
-                    foreach (var stream in streams.EnumerateArray())
-                    {
-                        var type = stream.TryGetProperty("Type", out var t) ? t.GetString() : "";
-                        if (type != "Subtitle") continue;
-
-                        subtitles.Add(new SubtitleInfo
-                        {
-                            Index = stream.TryGetProperty("Index", out var idx) ? idx.GetInt32() : -1,
-                            Language = stream.TryGetProperty("Language", out var l) ? l.GetString() ?? "und" : "und",
-                            Codec = stream.TryGetProperty("Codec", out var c) ? c.GetString() ?? "?" : "?",
-                            IsExternal = stream.TryGetProperty("IsExternal", out var e) && e.GetBoolean(),
-                            IsText = stream.TryGetProperty("IsTextSubtitleStream", out var txt) && txt.GetBoolean(),
-                            Title = stream.TryGetProperty("Title", out var ti) ? ti.GetString() ?? "" : ""
-                        });
-                    }
-                }
-
-                return GenerateQuickMergePage(name, path, subtitles);
-            }
-            catch (Exception ex)
-            {
-                return $@"<html><head><meta charset='utf-8'></head>
-                <body style='background:#1a1a2e;color:#fff;font-family:system-ui;padding:20px;'>
-                <h2 style='color:#ff6b6b;'>Erreur</h2>
-                <p>{WebUtility.HtmlEncode(ex.Message)}</p>
-                </body></html>";
-            }
-        }
-
-        private string GenerateQuickMergePage(string? movieName, string? moviePath, List<SubtitleInfo> subtitles)
-        {
-            var html = new StringBuilder();
-            html.Append(@"<!DOCTYPE html>
-<html>
-<head>
-    <meta charset='utf-8'>
-    <title>Fusionner les sous-titres</title>
-    <style>
-        * { box-sizing: border-box; }
-        body {
-            font-family: system-ui, -apple-system, sans-serif;
-            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
-            color: #e6eaf0;
-            margin: 0;
-            padding: 20px;
-            min-height: 100vh;
-        }
-        .container { max-width: 600px; margin: 0 auto; }
-        h1 { color: #00a4dc; font-size: 1.5em; margin: 0 0 5px 0; display: flex; align-items: center; gap: 10px; }
-        h1::before { content: '🔀'; }
-        .movie-name { color: #9fb0c2; font-size: 0.9em; margin-bottom: 20px; }
-        .card { background: rgba(255,255,255,0.05); border-radius: 12px; padding: 20px; margin-bottom: 15px; border: 1px solid rgba(255,255,255,0.1); }
-        .card h3 { color: #00a4dc; margin: 0 0 15px 0; font-size: 1em; }
-        label { display: block; color: #9fb0c2; margin-bottom: 5px; font-size: 0.9em; }
-        select, input {
-            width: 100%; padding: 10px; background: rgba(0,0,0,0.3);
-            border: 1px solid rgba(255,255,255,0.2); border-radius: 8px;
-            color: #e6eaf0; font-size: 1em; margin-bottom: 15px;
-        }
-        select:focus, input:focus { outline: none; border-color: #00a4dc; }
-        .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; }
-        .btn {
-            width: 100%; padding: 14px; border: none; border-radius: 8px;
-            font-weight: 600; cursor: pointer; font-size: 1em; transition: all 0.2s;
-        }
-        .btn-primary { background: linear-gradient(135deg, #00a4dc, #6366f1); color: white; }
-        .btn-primary:hover { transform: translateY(-2px); box-shadow: 0 5px 20px rgba(0,164,220,0.4); }
-        .btn-primary:disabled { opacity: 0.6; cursor: not-allowed; transform: none; }
-        .result { padding: 12px; border-radius: 8px; margin-top: 15px; display: none; }
-        .result.success { background: rgba(76,175,80,0.2); border-left: 4px solid #4CAF50; display: block; }
-        .result.error { background: rgba(244,67,54,0.2); border-left: 4px solid #f44336; display: block; }
-        .result.info { background: rgba(255,152,0,0.2); border-left: 4px solid #ff9800; display: block; }
-        details { margin-bottom: 15px; }
-        summary { color: #9fb0c2; cursor: pointer; padding: 10px; background: rgba(0,0,0,0.2); border-radius: 8px; }
-        details[open] summary { border-radius: 8px 8px 0 0; }
-        .options-content { background: rgba(0,0,0,0.2); padding: 15px; border-radius: 0 0 8px 8px; }
-        .no-subs { color: #ff9800; text-align: center; padding: 30px; }
-        .powered-by { text-align: center; margin-top: 20px; color: #666; font-size: 0.8em; }
-        .powered-by a { color: #00a4dc; text-decoration: none; }
-    </style>
-</head>
-<body>
-    <div class='container'>
-        <h1>Fusionner les sous-titres</h1>");
-
-            if (!string.IsNullOrEmpty(movieName))
-            {
-                html.Append($"<p class='movie-name'>{WebUtility.HtmlEncode(movieName)}</p>");
-            }
-
-            if (subtitles.Count < 2)
-            {
-                html.Append(@"
-        <div class='card'>
-            <div class='no-subs'>
-                <p>⚠️ Il faut au moins 2 sous-titres pour pouvoir les fusionner.</p>
-                <p style='font-size:0.9em;color:#888;'>Ajoutez des sous-titres externes ou assurez-vous que le fichier contient des sous-titres intégrés.</p>
-            </div>
-        </div>");
-            }
-            else
-            {
-                html.Append(@"
-        <div class='card'>
-            <h3>Sélectionner les sous-titres</h3>
-            <div class='grid'>
-                <div>
-                    <label>Sous-titre 1 (HAUT)</label>
-                    <select id='sub1'><option value=''>-- Choisir --</option>");
-
-                foreach (var s in subtitles)
-                {
-                    var label = $"#{s.Index} {s.Language.ToUpper()} ({s.Codec})";
-                    label += s.IsExternal ? " [EXT]" : " [INT]";
-                    if (!s.IsText) label += " [IMG]";
-                    html.Append($"<option value='{s.Index}' data-text='{s.IsText}'>{WebUtility.HtmlEncode(label)}</option>");
-                }
-
-                html.Append(@"</select>
-                </div>
-                <div>
-                    <label>Sous-titre 2 (BAS)</label>
-                    <select id='sub2'><option value=''>-- Choisir --</option>");
-
-                foreach (var s in subtitles)
-                {
-                    var label = $"#{s.Index} {s.Language.ToUpper()} ({s.Codec})";
-                    label += s.IsExternal ? " [EXT]" : " [INT]";
-                    if (!s.IsText) label += " [IMG]";
-                    html.Append($"<option value='{s.Index}' data-text='{s.IsText}'>{WebUtility.HtmlEncode(label)}</option>");
-                }
-
-                html.Append(@"</select>
-                </div>
-            </div>
-
-            <details>
-                <summary>Options avancées</summary>
-                <div class='options-content'>
-                    <div class='grid'>
-                        <div>
-                            <label>Mode de fusion</label>
-                            <select id='mode'>
-                                <option value='all'>Tous les sous-titres</option>
-                                <option value='overlapping'>Chevauchement uniquement</option>
-                                <option value='primary'>Priorité langue 1</option>
-                            </select>
-                        </div>
-                        <div>
-                            <label>Tolérance (ms)</label>
-                            <input type='number' id='tolerance' value='700' min='0' max='5000' step='100'>
-                        </div>
-                    </div>
-                </div>
-            </details>
-
-            <button id='btnMerge' class='btn btn-primary' onclick='doMerge()'>
-                Fusionner les sous-titres
-            </button>
-
-            <div id='result' class='result'></div>
-        </div>");
-            }
-
-            // Script JavaScript - use StringBuilder to avoid escaping issues
-            var pathEscaped = moviePath != null ? moviePath.Replace("\\", "\\\\").Replace("'", "\\'") : "";
-            html.Append("<div class='powered-by'>Powered by <a href='https://doublesub.io' target='_blank'>DoubleSub.io</a></div></div>");
-            html.Append("<script>");
-            html.Append("var videoPath = '").Append(pathEscaped).Append("';");
-            html.Append(@"
-function doMerge() {
-    var sub1 = document.getElementById('sub1').value;
-    var sub2 = document.getElementById('sub2').value;
-    var result = document.getElementById('result');
-    var btn = document.getElementById('btnMerge');
-    if (!sub1 || !sub2) { showResult('error', 'Selectionnez 2 sous-titres'); return; }
-    if (sub1 === sub2) { showResult('error', 'Choisissez 2 sous-titres differents'); return; }
-    btn.disabled = true;
-    btn.textContent = 'Fusion en cours...';
-    showResult('info', 'Traitement en cours...');
-    var mode = document.getElementById('mode').value;
-    var tolerance = parseInt(document.getElementById('tolerance').value) || 700;
-    fetch('/EmbySubtitleMerger/Merge?api_key=a482e26698584ef8a83d6ff49c0d8676', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-            VideoPath: videoPath,
-            PrimaryIndex: parseInt(sub1),
-            SecondaryIndex: parseInt(sub2),
-            Mode: mode,
-            ToleranceMs: tolerance,
-            UseCloudApi: false
-        })
-    })
-    .then(function(r) { return r.json(); })
-    .then(function(data) {
-        btn.disabled = false;
-        btn.textContent = 'Fusionner les sous-titres';
-        if (data.Success) {
-            showResult('success', 'Fusion reussie! ' + data.CueCount + ' sous-titres crees. ' + data.OutputPath);
-        } else {
-            showResult('error', 'Erreur: ' + data.Error);
-        }
-    })
-    .catch(function(err) {
-        btn.disabled = false;
-        btn.textContent = 'Fusionner les sous-titres';
-        showResult('error', 'Erreur: ' + err.message);
-    });
-}
-function showResult(type, msg) {
-    var el = document.getElementById('result');
-    el.className = 'result ' + type;
-    el.innerHTML = msg;
-}
-");
-            html.Append("</script></body></html>");
-
-            return html.ToString();
-        }
-    }
-
-    /// <summary>
-    /// Info d'un sous-titre
-    /// </summary>
-    public class SubtitleInfo
-    {
-        public int Index { get; set; }
-        public string Language { get; set; } = "und";
-        public string Codec { get; set; } = "?";
-        public bool IsExternal { get; set; }
-        public bool IsText { get; set; }
-        public string Title { get; set; } = "";
     }
 }
-
-

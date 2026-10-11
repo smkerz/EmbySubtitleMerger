@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using MediaBrowser.Controller.Library;
+using MediaBrowser.Controller.Net;
 using MediaBrowser.Model.Services;
 
 namespace EmbySubtitleMerger.Subtitles
@@ -12,6 +13,7 @@ namespace EmbySubtitleMerger.Subtitles
     /// vers le nouveau format "Film.Français + English.fr.srt".
     /// </summary>
     [Route("/EmbySubtitleMerger/RenameLegacyDual", "POST")]
+    [Authenticated(Roles = "Admin")]
     public class RenameLegacyDualRequest : IReturn<RenameLegacyDualResponse>
     {
         /// <summary>true (défaut) = simple aperçu, aucun fichier n'est touché</summary>
@@ -47,8 +49,32 @@ namespace EmbySubtitleMerger.Subtitles
         public int Errors { get; set; }
     }
 
+    /// <summary>
+    /// Met de côté d'anciens "Film.dual.srt" que le renommage ne sait pas traiter (une seule langue,
+    /// fichier illisible…). Ils sont déplacés dans un dossier "_anciens_dual" à la racine de leur
+    /// médiathèque, jamais supprimés.
+    /// </summary>
+    [Route("/EmbySubtitleMerger/RemoveLegacyDual", "POST")]
+    [Authenticated(Roles = "Admin")]
+    public class RemoveLegacyDualRequest : IReturn<RemoveLegacyDualResponse>
+    {
+        public List<string> Paths { get; set; } = new List<string>();
+    }
+
+    public class RemoveLegacyDualResponse
+    {
+        public bool Success { get; set; }
+        public string? Error { get; set; }
+        public int Moved { get; set; }
+
+        /// <summary>Fichiers refusés ou en échec, avec la raison</summary>
+        public List<RenameLegacyDualItem> Problems { get; set; } = new List<RenameLegacyDualItem>();
+    }
+
     public class RenameService : IService
     {
+        public const string RemovedFolderName = "_anciens_dual";
+
         private readonly ILibraryManager _libraryManager;
 
         public RenameService(ILibraryManager libraryManager)
@@ -103,6 +129,79 @@ namespace EmbySubtitleMerger.Subtitles
             }
 
             return response;
+        }
+
+        public object Post(RemoveLegacyDualRequest request)
+        {
+            var response = new RemoveLegacyDualResponse();
+
+            try
+            {
+                var folders = LibraryFolders.All(_libraryManager);
+
+                foreach (var path in (request.Paths ?? new List<string>()).Distinct(StringComparer.OrdinalIgnoreCase))
+                {
+                    var problem = MoveAside(path, folders);
+                    if (problem == null)
+                        response.Moved++;
+                    else
+                        response.Problems.Add(new RenameLegacyDualItem { OldPath = path, Status = RenameLegacyDualItem.Failed, Detail = problem });
+                }
+
+                if (response.Moved > 0)
+                {
+                    try { _libraryManager.QueueLibraryScan(); } catch { }
+                }
+
+                Plugin.Log($"[Rename] Mise de côté : {response.Moved} fichier(s), {response.Problems.Count} refus ou échec(s)");
+                response.Success = true;
+            }
+            catch (Exception ex)
+            {
+                Plugin.Log($"[Rename] ERREUR mise de côté: {ex}");
+                response.Error = ex.Message;
+            }
+
+            return response;
+        }
+
+        /// <summary>
+        /// Déplace un .dual.srt dans le dossier _anciens_dual de sa médiathèque.
+        /// Retourne null si c'est fait, sinon la raison du refus.
+        /// </summary>
+        internal static string? MoveAside(string path, IReadOnlyList<string> libraryFolders)
+        {
+            try
+            {
+                // La requête ne peut désigner qu'un ancien bilingue situé dans une médiathèque
+                if (string.IsNullOrWhiteSpace(path) || !path.EndsWith(SubtitleNaming.LegacyDualSuffix, StringComparison.OrdinalIgnoreCase))
+                    return "Ce n'est pas un fichier .dual.srt.";
+
+                var full = Path.GetFullPath(path);
+                var library = libraryFolders
+                    .Select(Path.GetFullPath)
+                    .FirstOrDefault(folder => full.StartsWith(
+                        folder.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar,
+                        StringComparison.OrdinalIgnoreCase));
+
+                if (library == null) return "Le fichier n'est dans aucune médiathèque.";
+                if (!File.Exists(full)) return "Fichier introuvable.";
+
+                var targetFolder = Path.Combine(library, RemovedFolderName);
+                Directory.CreateDirectory(targetFolder);
+
+                // Deux films de dossiers différents peuvent porter le même nom de fichier
+                var target = Path.Combine(targetFolder, Path.GetFileName(full));
+                for (var n = 2; File.Exists(target); n++)
+                    target = Path.Combine(targetFolder, $"{Path.GetFileNameWithoutExtension(full)} ({n}).srt");
+
+                File.Move(full, target);
+                return null;
+            }
+            catch (Exception ex)
+            {
+                return ex.Message;
+            }
         }
 
         private static RenameLegacyDualItem ProcessFile(string legacyPath, bool dryRun)
