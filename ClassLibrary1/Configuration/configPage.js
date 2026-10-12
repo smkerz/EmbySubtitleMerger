@@ -1,7 +1,7 @@
 define([], function () {
     'use strict';
 
-    console.log('[SubMerger] Module loaded v9.15.1');
+    console.log('[SubMerger] Module loaded v9.16.0');
 
     var allMovies = [];      // Tous les medias charges
     var filteredMovies = []; // Medias filtres
@@ -1098,6 +1098,7 @@ define([], function () {
                     ToleranceMs: readTolerance(view),
                     Layout: view.querySelector('#layout').value,
                     MarkDefault: view.querySelector('#mergeDefault').checked,
+                    BatchTranslate: view.querySelector('#batchTranslate').checked,
                     VideoPath: wholeLibrary ? '' : currentVideoPath()
                 };
             } else {
@@ -1222,7 +1223,9 @@ define([], function () {
         var changes = data.Created + data.Renamed + data.Tagged + data.Deleted + (data.Merged || 0);
         var summary;
         if (data.BatchMerge) {
-            var without = data.Unmatched > 0 ? ' ' + data.Unmatched + ' vidéo(s) n\'ont pas les deux langues.' : '';
+            var without = (data.Unmatched > 0 ? ' ' + data.Unmatched + ' vidéo(s) n\'ont pas les deux langues.' : '')
+                + (data.WithoutSubtitle > 0 ? ' ' + data.WithoutSubtitle + ' vidéo(s) n\'ont aucun sous-titre texte.' : '')
+                + (!data.DryRun && data.Translated > 0 ? ' ' + data.Translated + ' sous-titre(s) traduit(s).' : '');
             if (changes === 0 && data.Failures === 0) {
                 summary = 'Rien à créer sur ' + data.Total + ' vidéo(s) : les bilingues existent déjà, ou les deux langues manquent.' + without;
             } else if (data.DryRun) {
@@ -1357,7 +1360,7 @@ define([], function () {
         ['#normalizeScope', '#normalizeLanguages', '#normalizeOverwrite',
             '#cleanupConversions', '#cleanupBilingual', '#cleanupNote',
             '#libCleanupConversions', '#libCleanupBilingual', '#libCleanupNote',
-            '#batchLang1', '#batchLang2', '#batchScope', '#layout', '#mergeMode', '#mergeDefault',
+            '#batchLang1', '#batchLang2', '#batchScope', '#batchTranslate', '#layout', '#mergeMode', '#mergeDefault',
             '#moviesSelect', '#versionSelect'].forEach(function (selector) {
             on(selector, 'change', function () { invalidateNormalizePreview(view); });
             on(selector, 'input', function () { invalidateNormalizePreview(view); });
@@ -1377,7 +1380,7 @@ define([], function () {
     }
 
     return function (view) {
-        console.log('[SubMerger] Controller init v9.15.1');
+        console.log('[SubMerger] Controller init v9.16.0');
 
         var bound = false;
 

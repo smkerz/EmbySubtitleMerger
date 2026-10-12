@@ -10,7 +10,7 @@
          data-controller="configurationpage?name=subtitlemerger.js">
         <div data-role="content">
             <div class="content-primary">
-                <h1>Subtitle Merger <span style="font-size:0.5em; color:#888;">v9.15.1</span></h1>
+                <h1>Subtitle Merger <span style="font-size:0.5em; color:#888;">v9.16.0</span></h1>
 
                 <style>
                     .merger-card { background: rgba(0,0,0,0.2); border-radius: 8px; padding: 15px; margin-bottom: 15px; }
@@ -397,6 +397,17 @@
                                 <select id="batchLang2" is="emby-select"></select>
                             </div>
                         </div>
+                        <label class="merger-check" style="margin-top:12px;">
+                            <input type="checkbox" id="batchTranslate">
+                            <span>Traduire automatiquement ce qui manque : si une seule des deux langues existe, l'autre est traduite depuis elle ;
+                            si aucune des deux n'existe, les deux sont traduites depuis le premier sous-titre disponible. Les traductions sont
+                            aussi gardées à côté de la vidéo (<em>Film.fr.srt</em>). Moteur : celui de l'onglet Traduire.</span>
+                        </label>
+                        <p class="merger-help" style="margin-top:6px;">
+                            Avec Google Traduction, comptez environ une minute par film ; après plusieurs dizaines de films, Google peut refuser
+                            les demandes pendant quelques heures. La série s'arrête alors de traduire et le dit ; relancez-la plus tard, elle
+                            reprend où elle en était.
+                        </p>
                         <div class="option-group" style="margin-top:12px;">
                             <label for="batchScope">Périmètre:</label>
                             <select id="batchScope" is="emby-select">

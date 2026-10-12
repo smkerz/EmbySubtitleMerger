@@ -59,6 +59,18 @@ namespace EmbySubtitleMerger.Subtitles
         public LanguageInfo? BatchLanguage2 { get; set; }
         public MergeOptions BatchMergeOptions { get; set; } = new MergeOptions();
 
+        /// <summary>
+        /// En fusion en série, traduire la langue qui manque depuis celle qui existe ; si les deux manquent,
+        /// les traduire toutes deux depuis le premier sous-titre disponible.
+        /// </summary>
+        public bool BatchTranslate { get; set; }
+
+        /// <summary>Crée le moteur de traduction pour (code de la langue source ou null, code de la langue cible)</summary>
+        public Func<string?, string, ITranslationEngine>? CreateTranslationEngine { get; set; }
+
+        /// <summary>Nom du moteur, pour retrouver une traduction interrompue</summary>
+        public string TranslationEngineName { get; set; } = TranslationEngines.Google;
+
         /// <summary>En fusion en série, marquer les bilingues "default"</summary>
         public bool MarkDefault { get; set; }
 
@@ -121,6 +133,16 @@ namespace EmbySubtitleMerger.Subtitles
         /// <summary>Vidéos écartées d'une fusion en série, faute d'avoir les deux langues</summary>
         public int Unmatched { get; private set; }
 
+        /// <summary>Sous-titres traduits par une fusion en série</summary>
+        public int Translated { get; private set; }
+
+        /// <summary>Vidéos sans aucun sous-titre texte, rencontrées par une fusion en série avec traduction</summary>
+        public int WithoutSubtitle { get; private set; }
+
+        /// <summary>Échecs de traduction consécutifs, et arrêt des traductions quand le moteur ne répond plus</summary>
+        internal int TranslationFailuresInARow { get; set; }
+        internal bool TranslationHalted { get; set; }
+
         public int Created { get; private set; }
         public int Renamed { get; private set; }
         public int Tagged { get; private set; }
@@ -165,6 +187,16 @@ namespace EmbySubtitleMerger.Subtitles
         public void CountUnmatched()
         {
             lock (_actions) Unmatched++;
+        }
+
+        public void CountTranslation()
+        {
+            lock (_actions) Translated++;
+        }
+
+        public void CountWithoutSubtitle()
+        {
+            lock (_actions) WithoutSubtitle++;
         }
 
         public List<NormalizeAction> SnapshotActions()
@@ -238,8 +270,8 @@ namespace EmbySubtitleMerger.Subtitles
 
                 if (options.BatchMerge)
                 {
-                    job.Message = $"{job.Merged} bilingue(s) {(options.DryRun ? "à créer" : "créé(s)")}, "
-                        + $"{job.Unmatched} vidéo(s) sans les deux langues, {job.Failures} échec(s).";
+                    job.Message = $"{job.Merged} bilingue(s) {(options.DryRun ? "à créer" : "créé(s)")}, {job.Translated} traduction(s), "
+                        + $"{job.Unmatched} vidéo(s) sans les deux langues, {job.WithoutSubtitle} sans aucun sous-titre, {job.Failures} échec(s).";
                 }
                 else if (options.Cleanup)
                 {

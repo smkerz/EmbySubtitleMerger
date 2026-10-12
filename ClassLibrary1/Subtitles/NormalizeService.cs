@@ -95,6 +95,11 @@ namespace EmbySubtitleMerger.Subtitles
 
         /// <summary>Fusion en série : marquer les bilingues "default"</summary>
         public bool MarkDefault { get; set; }
+
+        /// <summary>
+        /// Fusion en série : traduire la ou les langues absentes, avec le moteur des réglages de traduction
+        /// </summary>
+        public bool BatchTranslate { get; set; }
     }
 
     public class NormalizeResponse
@@ -125,6 +130,8 @@ namespace EmbySubtitleMerger.Subtitles
         public bool BatchMerge { get; set; }
         public int Merged { get; set; }
         public int Unmatched { get; set; }
+        public int Translated { get; set; }
+        public int WithoutSubtitle { get; set; }
         public int Processed { get; set; }
         public int Total { get; set; }
         public int PercentComplete { get; set; }
@@ -224,6 +231,22 @@ namespace EmbySubtitleMerger.Subtitles
                         return Fail("Choisissez deux langues différentes.");
 
                     options.BatchMergeOptions = MergeOptions.From(request.MergeMode, request.ToleranceMs, null, null, request.Layout);
+
+                    if (request.BatchTranslate)
+                    {
+                        // Même moteur et même clé que l'onglet Traduire
+                        var config = Plugin.Instance?.Configuration;
+                        var engine = TranslationEngines.IsKnown(config?.TranslationEngine) ? config!.TranslationEngine : TranslationEngines.Google;
+                        var apiKey = config?.AnthropicApiKey;
+                        var model = config?.TranslationModel;
+
+                        if (engine == TranslationEngines.Claude && string.IsNullOrWhiteSpace(apiKey))
+                            return Fail("Le moteur de traduction choisi est Claude, mais aucune clé API n'est enregistrée (onglet Traduire).");
+
+                        options.BatchTranslate = true;
+                        options.TranslationEngineName = engine;
+                        options.CreateTranslationEngine = (source, target) => TranslationEngines.Create(engine, apiKey, model, source, target);
+                    }
                 }
 
                 // Les langues ne servent qu'à la normalisation
@@ -298,6 +321,8 @@ namespace EmbySubtitleMerger.Subtitles
                 BatchMerge = job.BatchMerge,
                 Merged = job.Merged,
                 Unmatched = job.Unmatched,
+                Translated = job.Translated,
+                WithoutSubtitle = job.WithoutSubtitle,
                 Processed = job.Processed,
                 Total = job.Total,
                 PercentComplete = job.PercentComplete,
