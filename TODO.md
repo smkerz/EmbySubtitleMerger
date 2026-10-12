@@ -1,7 +1,7 @@
 # À faire
 
 État au 12/10/2026, version 9.16.0. Tout le code est commité sur la branche
-`feature/traduction-nommage-disposition`, non poussée et non fusionnée dans `main`.
+`feature/traduction-nommage-disposition`, fusionnée dans `main` et poussée sur GitHub.
 
 L'utilisateur a confirmé sur le NAS, sans détailler : le plugin se charge (tâche planifiée et
 authentification comprises) et le nettoyage fonctionne, y compris celui des bilingues (9.15.1).
@@ -28,7 +28,7 @@ La 9.16.0 est installée et fonctionne (retour du 12/10/2026, sans détail des f
 
 - [x] **Clé API Emby publiée dans l'historique git** : sans objet. Elle appartenait au serveur Emby du PC,
       qui n'existe plus (confirmé par l'utilisateur le 12/10/2026) ; le seul serveur est celui du Synology.
-- [ ] Fusionner la branche dans `main` et pousser sur GitHub (attend l'accord de l'utilisateur : dépôt public).
+- [x] Branche fusionnée dans `main` et poussée sur GitHub le 12/10/2026 (9.16.0).
 - [ ] Captures d'écran du README à refaire (elles montrent l'ancienne page).
 - [ ] Moteur de traduction gratuit de meilleure qualité (Gemini, palier gratuit avec clé) si Google
       Traduction ne suffit pas.
