@@ -24,7 +24,6 @@ namespace EmbySubtitleMerger.Subtitles
 
         public bool IsStyled => Codec == "ass" || Codec == "ssa";
         public bool IsText => Codec == "subrip" || Codec == "mov_text" || Codec == "webvtt";
-        public bool IsImage => Codec == "hdmv_pgs_subtitle" || Codec == "dvd_subtitle" || Codec == "dvb_subtitle";
 
         /// <summary>Marquée "forced" dans la vidéo : ne contient que quelques répliques</summary>
         public bool ForcedFlag { get; set; }
@@ -47,7 +46,7 @@ namespace EmbySubtitleMerger.Subtitles
     /// </summary>
     public static class NormalizeNaming
     {
-        /// <summary>Note écrite dans le titre des pistes intégrées</summary>
+        /// <summary>Note que d'anciennes versions écrivaient dans le titre des pistes intégrées ; le nettoyage sait la retirer</summary>
         public const string Note = "Normalisé pour Emby";
 
         /// <summary>Note dans les noms de fichiers : Emby supprime les espaces, d'où les tirets</summary>
@@ -62,7 +61,8 @@ namespace EmbySubtitleMerger.Subtitles
         };
 
         /// <summary>"….dual.srt" ou "….dual.ru-en.en.srt" : un bilingue, quel que soit le nom qui précède</summary>
-        private static readonly Regex DualNameRegex = new Regex(@"\.dual(\.[^.]+)*\.srt$",RegexOptions.Compiled | RegexOptions.IgnoreCase);
+        private static readonly Regex DualNameRegex =
+            new Regex(SubtitleNaming.ForeignDualPattern, RegexOptions.Compiled | RegexOptions.IgnoreCase);
 
         /// <summary>
         /// Indique si un .srt qui ne correspond à aucune vidéo du dossier porte un nom de bilingue.
@@ -82,6 +82,24 @@ namespace EmbySubtitleMerger.Subtitles
         /// <summary>Ancienne note à espaces : "Normalisé pour Emby - titre (2)"</summary>
         private static readonly Regex LegacyNoteRegex =
             new Regex("^" + Regex.Escape(Note) + @"(?: - (.*?))?(?: \((\d+)\))?$", RegexOptions.Compiled);
+
+        /// <summary>Note des traductions faites par la fusion en série</summary>
+        public const string AutoTranslationNote = "Traduction-auto";
+
+        /// <summary>
+        /// Fichier d'une traduction automatique : Film.Traduction-auto(google).fr.srt. La note dit dans Emby
+        /// d'où vient ce sous-titre, et permet de ne pas le prendre ensuite pour une piste d'origine.
+        /// </summary>
+        public static string AutoTranslationPath(string videoPath, string languageCode, string engine)
+        {
+            return Sibling(videoPath, $"{Path.GetFileNameWithoutExtension(videoPath)}.{AutoTranslationNote}({engine}).{languageCode}.srt");
+        }
+
+        public static bool IsAutoTranslation(string srtPath, string videoPath)
+        {
+            var prefix = Path.GetFileNameWithoutExtension(videoPath) + "." + AutoTranslationNote + "(";
+            return Path.GetFileName(srtPath).StartsWith(prefix, StringComparison.Ordinal);
+        }
 
         public static bool IsVideo(string path) => VideoExtensions.Contains(Path.GetExtension(path));
 
@@ -147,21 +165,19 @@ namespace EmbySubtitleMerger.Subtitles
         }
 
         /// <summary>
-        /// Film.fre.srt devient Film.Normalisé-pour-Emby.fre.srt.
-        /// Avec newExtension, l'extension est remplacée (Film.rus.ass devient ….rus.srt, Film.ass devient ….srt).
+        /// Nom du .srt tiré d'un .ass/.ssa posé à côté d'une vidéo : Film.rus.ass donne
+        /// Film.Normalisé-pour-Emby.rus.srt, et Film.ass (sans code de langue) Film.Normalisé-pour-Emby.srt.
         /// Le sous-titre doit appartenir à la vidéo (son nom commence par celui de la vidéo).
         /// </summary>
-        public static string PathWithNote(string subtitlePath, string videoPath, string? newExtension = null)
+        public static string ConvertedExternalPath(string styledPath, string videoPath)
         {
             var stem = Path.GetFileNameWithoutExtension(videoPath);
-            var name = Path.GetFileName(subtitlePath);
-            if (newExtension != null)
-                name = Path.GetFileNameWithoutExtension(name) + newExtension;
+            var name = Path.GetFileNameWithoutExtension(styledPath) + ".srt";
 
-            // ".fre.srt", ou ".srt" quand le sous-titre n'a pas de code de langue
+            // ".rus.srt", ou ".srt" quand le sous-titre n'a pas de code de langue
             var rest = name.StartsWith(stem + ".", StringComparison.Ordinal) ? name.Substring(stem.Length) : "." + name;
 
-            return Sibling(subtitlePath, $"{stem}.{FileNoteBase}{rest}");
+            return Sibling(styledPath, $"{stem}.{FileNoteBase}{rest}");
         }
 
         /// <summary>
@@ -198,7 +214,7 @@ namespace EmbySubtitleMerger.Subtitles
 
         /// <summary>
         /// Indique si un .srt est un bilingue créé par ce plugin (Film.dual.srt, Film.Français + English.fr.srt).
-        /// Ces fichiers ont déjà leur propre titre : ils ne reçoivent pas la note.
+        /// Le nettoyage les traite à part (option « bilingues ») et la fusion en série ne les prend jamais pour source.
         /// </summary>
         public static bool IsBilingual(string srtPath, string videoPath)
         {

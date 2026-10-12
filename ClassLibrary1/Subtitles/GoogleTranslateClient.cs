@@ -25,8 +25,14 @@ namespace EmbySubtitleMerger.Subtitles
     {
         private const string ApiUrl = "https://translate.googleapis.com/translate_a/single?client=gtx&dt=t";
 
-        /// <summary>Au-delà, le service tronque ou refuse la demande</summary>
-        private const int MaxCharsPerRequest = 1500;
+        /// <summary>Répliques reçues par appel ; elles sont ensuite réparties en requêtes par taille</summary>
+        public const int CuesPerCall = 200;
+
+        /// <summary>
+        /// Texte envoyé par requête. Le service accepte bien plus (13 000 caractères essayés sans perte),
+        /// mais c'est le nombre de requêtes qui déclenche ses refus : on en envoie peu, de taille moyenne.
+        /// </summary>
+        private const int MaxCharsPerRequest = 5000;
 
         /// <summary>Pause entre deux demandes, pour ne pas être pris pour un robot abusif</summary>
         private static readonly TimeSpan Pause = TimeSpan.FromMilliseconds(400);
@@ -78,20 +84,7 @@ namespace EmbySubtitleMerger.Subtitles
                     .ToList();
 
                 foreach (var chunk in SplitBySize(lines))
-                {
-                    var translated = (await RequestAsync(string.Join("\n", chunk.Select(l => l.Text)), cancellationToken)).Split('\n');
-
-                    if (translated.Length == chunk.Count)
-                    {
-                        for (var i = 0; i < chunk.Count; i++)
-                            result.Translations[chunk[i].Id] = Rewrap(translated[i]);
-                        continue;
-                    }
-
-                    // Le service a fusionné ou coupé des lignes : on reprend ce groupe réplique par réplique
-                    foreach (var line in chunk)
-                        result.Translations[line.Id] = Rewrap(await RequestAsync(line.Text, cancellationToken));
-                }
+                    await TranslateGroupAsync(chunk, result.Translations, cancellationToken);
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
@@ -104,6 +97,28 @@ namespace EmbySubtitleMerger.Subtitles
             }
 
             return result;
+        }
+
+        /// <summary>
+        /// Traduit un groupe de répliques en une requête. Si le service rend un autre nombre de lignes
+        /// (il en a fusionné ou coupé), le groupe est repris par moitiés, jusqu'à la réplique seule :
+        /// seule la zone en cause coûte des requêtes supplémentaires.
+        /// </summary>
+        private async Task TranslateGroupAsync(
+            List<(int Id, string Text)> group, Dictionary<int, string> translations, CancellationToken cancellationToken)
+        {
+            var translated = (await RequestAsync(string.Join("\n", group.Select(l => l.Text)), cancellationToken)).Split('\n');
+
+            if (translated.Length == group.Count || group.Count == 1)
+            {
+                for (var i = 0; i < group.Count; i++)
+                    translations[group[i].Id] = Rewrap(group.Count == 1 ? string.Join(" ", translated) : translated[i]);
+                return;
+            }
+
+            var half = group.Count / 2;
+            await TranslateGroupAsync(group.GetRange(0, half), translations, cancellationToken);
+            await TranslateGroupAsync(group.GetRange(half, group.Count - half), translations, cancellationToken);
         }
 
         private static IEnumerable<List<(int Id, string Text)>> SplitBySize(List<(int Id, string Text)> lines)
@@ -152,8 +167,9 @@ namespace EmbySubtitleMerger.Subtitles
         }
 
         /// <summary>
-        /// La réponse est un tableau de segments [traduction, original, …] ; mis bout à bout,
-        /// ils redonnent le texte entier, sauts de ligne compris.
+        /// La réponse est un tableau de segments [traduction, original, …]. Les lignes sont recomposées d'après
+        /// les sauts de ligne du texte d'origine, pas d'après ceux de la traduction : si le service déplace
+        /// un saut de ligne en traduisant, chaque traduction reste attachée à la réplique dont elle vient.
         /// </summary>
         internal static string ParseResponse(string raw)
         {
@@ -163,14 +179,26 @@ namespace EmbySubtitleMerger.Subtitles
             if (root.ValueKind != JsonValueKind.Array || root.GetArrayLength() == 0 || root[0].ValueKind != JsonValueKind.Array)
                 throw new InvalidOperationException("Réponse de Google Traduction illisible : le service a peut-être changé.");
 
-            var text = new StringBuilder();
+            var lines = new List<string>();
+            var current = new StringBuilder();
+
             foreach (var segment in root[0].EnumerateArray())
             {
-                if (segment.ValueKind == JsonValueKind.Array && segment.GetArrayLength() > 0 && segment[0].ValueKind == JsonValueKind.String)
-                    text.Append(segment[0].GetString());
+                if (segment.ValueKind != JsonValueKind.Array || segment.GetArrayLength() == 0 || segment[0].ValueKind != JsonValueKind.String)
+                    continue;
+
+                current.Append((segment[0].GetString() ?? string.Empty).Replace('\n', ' '));
+
+                var original = segment.GetArrayLength() > 1 && segment[1].ValueKind == JsonValueKind.String ? segment[1].GetString() : null;
+                if (original != null && original.EndsWith("\n", StringComparison.Ordinal))
+                {
+                    lines.Add(current.ToString().Trim());
+                    current.Clear();
+                }
             }
 
-            return text.ToString();
+            lines.Add(current.ToString().Trim());
+            return string.Join("\n", lines);
         }
 
         /// <summary>

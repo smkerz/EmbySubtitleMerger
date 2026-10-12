@@ -1,8 +1,5 @@
 using System;
 using System.IO;
-using System.Net;
-using System.Text;
-using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using MediaBrowser.Controller.Net;
@@ -44,12 +41,6 @@ namespace EmbySubtitleMerger.Subtitles
         /// <summary>Tolérance en ms</summary>
         public int? ToleranceMs { get; set; }
 
-
-        /// <summary>Couleur du sous-titre primaire (ex: #FFFFFF)</summary>
-        public string? Color1 { get; set; }
-
-        /// <summary>Couleur du sous-titre secondaire (ex: #FFFF00)</summary>
-        public string? Color2 { get; set; }
 
         /// <summary>Decalage en ms pour le sous-titre 1</summary>
         public int Offset1Ms { get; set; } = 0;
@@ -189,7 +180,7 @@ namespace EmbySubtitleMerger.Subtitles
                 if (!File.Exists(request.VideoPath))
                     return Fail($"Fichier vidéo non trouvé: {request.VideoPath}");
 
-                progress?.Invoke("Etape 1/2 : lecture des deux sous-titres");
+                progress?.Invoke("Étape 1/2 : lecture des deux sous-titres");
                 var (source1, source2) = await SubtitleSource.AcquirePairAsync(
                     request.VideoPath,
                     request.Primary1IsExternal, request.Primary1Path, request.PrimaryIndex,
@@ -202,7 +193,7 @@ namespace EmbySubtitleMerger.Subtitles
 
                 try
                 {
-                    progress?.Invoke("Etape 2/2 : fusion");
+                    progress?.Invoke("Étape 2/2 : fusion");
 
                     // Le nom du fichier porte les deux langues : c'est ce qu'Emby affiche dans le lecteur
                     var language1 = SubtitleNaming.ResolveOrDetect(request.Language1, source1.Path);
@@ -213,7 +204,7 @@ namespace EmbySubtitleMerger.Subtitles
                         return Fail("Le fichier produit écraserait l'un des deux sous-titres choisis. Choisissez deux autres pistes.");
 
                     return RemoveReplacedDuals(
-                        MergeLocally(source1.Path, source2.Path, outputPath, request), request, language1, language2, source1, source2);
+                        MergeAndWrite(source1.Path, source2.Path, outputPath, request), request, language1, language2, source1, source2);
                 }
                 finally
                 {
@@ -233,8 +224,8 @@ namespace EmbySubtitleMerger.Subtitles
         }
 
         /// <summary>
-        /// Après une fusion réussie, retire les bilingues qu'elle remplace : l'ancien Film.dual.srt,
-        /// et le même bilingue sous l'autre forme (avec ou sans "default"). Sans cela, Emby les listerait en double.
+        /// Après une fusion réussie, retire le même bilingue sous l'autre forme (avec ou sans "default") :
+        /// sans cela, Emby le listerait en double.
         /// </summary>
         private static MergeSubtitlesResponse RemoveReplacedDuals(
             MergeSubtitlesResponse result,
@@ -246,9 +237,10 @@ namespace EmbySubtitleMerger.Subtitles
         {
             if (!result.Success || result.OutputPath == null) return result;
 
+            // Seulement le même bilingue sous l'autre forme. Un Film.dual.srt est laissé : rien ne dit
+            // qu'il porte les mêmes langues (le nettoyage des bilingues sait le retirer sur demande).
             var replaced = new[]
             {
-                SubtitleNaming.DualPath(request.VideoPath!, null, null),
                 SubtitleNaming.DualPath(request.VideoPath!, language1, language2, !request.MarkDefault)
             };
 
@@ -282,7 +274,7 @@ namespace EmbySubtitleMerger.Subtitles
         /// <summary>
         /// Fusionne les deux SRT et écrit le bilingue
         /// </summary>
-        private static MergeSubtitlesResponse MergeLocally(
+        private static MergeSubtitlesResponse MergeAndWrite(
             string srt1Path,
             string srt2Path,
             string outputPath,
@@ -296,7 +288,7 @@ namespace EmbySubtitleMerger.Subtitles
                 ApplyOffset(primary, request.Offset1Ms);
                 ApplyOffset(secondary, request.Offset2Ms);
 
-                var options = MergeOptions.From(request.Mode, request.ToleranceMs, request.Color1, request.Color2, request.Layout);
+                var options = MergeOptions.From(request.Mode, request.ToleranceMs, request.Layout);
                 var merged = SubtitleMerger.Merge(primary, secondary, options);
 
                 SrtParser.WriteFile(outputPath, merged);
@@ -304,14 +296,14 @@ namespace EmbySubtitleMerger.Subtitles
                 return new MergeSubtitlesResponse
                 {
                     Success = true,
-                    Message = $"Fusion locale réussie! {merged.Count} sous-titres créés.",
+                    Message = $"Fusion réussie : {merged.Count} répliques.",
                     OutputPath = outputPath,
                     CueCount = merged.Count
                 };
             }
             catch (Exception ex)
             {
-                return Fail($"Erreur fusion locale: {ex.Message}");
+                return Fail($"Erreur de fusion : {ex.Message}");
             }
         }
 

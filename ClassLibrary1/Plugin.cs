@@ -69,15 +69,12 @@ namespace EmbySubtitleMerger
 
     public class PluginConfiguration : BasePluginConfiguration
     {
-        public string DefaultLanguage1 { get; set; } = "en";
-        public string DefaultLanguage2 { get; set; } = "fr";
-        public string OutputFormat { get; set; } = "srt";
 
         public const string DefaultNormalizeLanguages = "en,fr,ru";
 
         /// <summary>
         /// Langues converties par la tâche planifiée de normalisation : celles de la dernière
-        /// normalisation de toutes les médiathèques lancée depuis la page.
+        /// normalisation de toutes les médiathèques lancée depuis la page (pas d'une seule médiathèque ni d'un film).
         /// </summary>
         public string NormalizeLanguages { get; set; } = DefaultNormalizeLanguages;
 
@@ -94,6 +91,5 @@ namespace EmbySubtitleMerger
         public string TranslationModel { get; set; } = Subtitles.ClaudeTranslationClient.DefaultModel;
 
         /// <summary>Nombre de répliques envoyées par appel API</summary>
-        public int TranslationBatchSize { get; set; } = Subtitles.SubtitleTranslator.DefaultBatchSize;
     }
 }

@@ -142,6 +142,16 @@ namespace EmbySubtitleMerger.Subtitles
         }
 
         /// <summary>
+        /// Fin de nom d'un bilingue fait par un autre outil : ".dual.srt", ".dual.ru-en.srt", ".dual.ru-en.en.srt",
+        /// avec ".default" éventuel. Volontairement étroit : "Film.Dual.Audio.en.srt" est un sous-titre ordinaire
+        /// d'une vidéo en double piste audio, pas un bilingue.
+        /// </summary>
+        public const string ForeignDualPattern = @"\.dual(\.[a-z]{2,3}-[a-z]{2,3})?(\.[a-z]{2,3})?(\.default)?\.srt$";
+
+        private static readonly Regex ForeignDualRegex =
+            new Regex("^" + ForeignDualPattern, RegexOptions.Compiled | RegexOptions.IgnoreCase);
+
+        /// <summary>
         /// Indique si un nom de fichier est celui d'un bilingue de la vidéo donnée : l'ancien Film.dual.srt,
         /// un "Film.dual.….srt" fait par un autre outil, ou la forme exacte produite par DualFileName
         /// avec deux langues du catalogue.
@@ -152,12 +162,8 @@ namespace EmbySubtitleMerger.Subtitles
 
             if (fileName.Equals(videoName + LegacyDualSuffix, StringComparison.OrdinalIgnoreCase)) return true;
 
-            // Bilingues faits par d'autres outils : "Film.dual.ru-en.en.srt". Le titre commence par "dual"
-            if (fileName.StartsWith(videoName + ".dual.", StringComparison.OrdinalIgnoreCase)
-                && fileName.EndsWith(".srt", StringComparison.OrdinalIgnoreCase))
-            {
-                return true;
-            }
+            // Bilingues faits par d'autres outils : "Film.dual.ru-en.en.srt"
+            if (ForeignDualRegex.IsMatch(fileName.Substring(videoName.Length))) return true;
 
             // "Français + English.fr.srt" ou "Français + English.fr.default.srt"
             var parts = fileName.Substring(videoName.Length + 1).Split('.');

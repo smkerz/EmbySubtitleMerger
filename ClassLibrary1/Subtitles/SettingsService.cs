@@ -38,6 +38,48 @@ namespace EmbySubtitleMerger.Subtitles
         public string? DefaultTargetLanguage { get; set; }
     }
 
+    /// <summary>
+    /// Moteur, clé et modèle à utiliser pour une traduction : ce que la requête précise, sinon les réglages enregistrés
+    /// </summary>
+    public sealed class TranslationSettings
+    {
+        public string Engine { get; private set; } = TranslationEngines.Google;
+        public string? ApiKey { get; private set; }
+        public string? Model { get; private set; }
+
+        /// <summary>Renseigné quand la traduction ne peut pas être lancée avec ces réglages</summary>
+        public string? Error { get; private set; }
+
+        public ITranslationEngine CreateEngine(string? sourceLanguage, string targetLanguage)
+        {
+            return TranslationEngines.Create(Engine, ApiKey, Model, sourceLanguage, targetLanguage);
+        }
+
+        public static TranslationSettings Resolve(string? engine = null, string? apiKey = null, string? model = null)
+        {
+            var config = Plugin.Instance?.Configuration;
+            var settings = new TranslationSettings
+            {
+                Engine = (FirstNonBlank(engine, config?.TranslationEngine) ?? TranslationEngines.Google).Trim().ToLowerInvariant(),
+                ApiKey = FirstNonBlank(apiKey, config?.AnthropicApiKey),
+                Model = FirstNonBlank(model, config?.TranslationModel)
+            };
+
+            if (!TranslationEngines.IsKnown(settings.Engine))
+                settings.Error = $"Moteur de traduction inconnu: {settings.Engine}";
+            else if (settings.Engine == TranslationEngines.Claude && settings.ApiKey == null)
+                settings.Error = "Le moteur Claude demande une clé API Anthropic : enregistrez-la dans l'onglet Traduire, ou choisissez Google Traduction.";
+
+            return settings;
+        }
+
+        internal static string? FirstNonBlank(string? first, string? second)
+        {
+            if (!string.IsNullOrWhiteSpace(first)) return first;
+            return string.IsNullOrWhiteSpace(second) ? null : second;
+        }
+    }
+
     public class SettingsService : IService
     {
         public object Get(GetSettingsRequest request)

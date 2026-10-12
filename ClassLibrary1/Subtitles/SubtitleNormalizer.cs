@@ -1,8 +1,8 @@
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
-using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -21,6 +21,25 @@ namespace EmbySubtitleMerger.Subtitles
 
         /// <summary>Codes ISO 639-1 des langues à convertir (ex: en, fr, ru)</summary>
         public HashSet<string> Languages { get; set; } = new HashSet<string>();
+
+        /// <summary>
+        /// Ajoute les langues d'une liste "en, fr, ru". Retourne le premier code inconnu, ou null si tous sont reconnus.
+        /// </summary>
+        public string? AddLanguages(string? list)
+        {
+            string? unknown = null;
+
+            foreach (var code in (list ?? string.Empty).Split(new[] { ',', ';', ' ' }, StringSplitOptions.RemoveEmptyEntries))
+            {
+                var language = SubtitleNaming.Resolve(code);
+                if (language != null)
+                    Languages.Add(language.Code);
+                else
+                    unknown ??= code;
+            }
+
+            return unknown;
+        }
 
         /// <summary>Refaire les .srt qui existent déjà</summary>
         public bool Overwrite { get; set; }
@@ -117,6 +136,12 @@ namespace EmbySubtitleMerger.Subtitles
         /// <summary>Au-delà, les opérations ne sont plus listées une à une (les compteurs restent exacts)</summary>
         private const int MaxListedActions = 500;
 
+        /// <summary>
+        /// Plafond des opérations qui modifient des fichiers. Bien plus haut que celui des simples remarques :
+        /// l'aperçu est le seul contrôle avant une suppression, il doit montrer chaque fichier concerné.
+        /// </summary>
+        private const int MaxListedChanges = 5000;
+
         private readonly List<NormalizeAction> _actions = new List<NormalizeAction>();
 
         public bool DryRun { get; set; }
@@ -133,8 +158,11 @@ namespace EmbySubtitleMerger.Subtitles
         /// <summary>Vidéos écartées d'une fusion en série, faute d'avoir les deux langues</summary>
         public int Unmatched { get; private set; }
 
-        /// <summary>Sous-titres traduits par une fusion en série</summary>
+        /// <summary>Sous-titres traduits par une fusion en série, ou à traduire s'il s'agit d'un aperçu</summary>
         public int Translated { get; private set; }
+
+        /// <summary>Moteur de traduction d'une fusion en série avec traduction, sinon null</summary>
+        public string? TranslationEngine { get; set; }
 
         /// <summary>Vidéos sans aucun sous-titre texte, rencontrées par une fusion en série avec traduction</summary>
         public int WithoutSubtitle { get; private set; }
@@ -166,7 +194,12 @@ namespace EmbySubtitleMerger.Subtitles
                 else if (kind == NormalizeAction.Delete) Deleted++;
                 else if (kind == NormalizeAction.Merge) Merged++;
 
-                if (_actions.Count >= MaxListedActions)
+                // Trace durable de tout ce qui touche un fichier, même si la liste affichée est coupée
+                if (status != NormalizeAction.Planned && kind != NormalizeAction.Info)
+                    Plugin.Log($"[Normalize] {kind} {status}: {source}{(target != null ? " -> " + target : string.Empty)}{(status == NormalizeAction.Failed ? " (" + detail + ")" : string.Empty)}");
+
+                var limit = kind == NormalizeAction.Info ? MaxListedActions : MaxListedChanges;
+                if (_actions.Count >= limit)
                 {
                     ActionsTruncated = true;
                 }
@@ -208,7 +241,7 @@ namespace EmbySubtitleMerger.Subtitles
     /// <summary>
     /// Rend les sous-titres lisibles sur tous les appareils : les pistes ASS/SSA, que la plupart
     /// des TV et applis mobiles n'affichent pas, sont converties en .srt à côté des vidéos.
-    /// Reprend les étapes du script emby_subs.py. L'image et le son des vidéos ne sont jamais réécrits ;
+    /// La règle de nommage vient du script emby_subs.py d'origine. L'image et le son des vidéos ne sont jamais réécrits ;
     /// seule l'option CleanupNote modifie l'en-tête des .mkv (titre des pistes).
     /// </summary>
     public static class SubtitleNormalizer
@@ -253,6 +286,9 @@ namespace EmbySubtitleMerger.Subtitles
 
             try
             {
+                if (options.Cleanup && options.BatchMerge)
+                    throw new InvalidOperationException("Nettoyage et fusion en série ne se demandent pas ensemble.");
+
                 job.Status = JobStatus.Running;
                 job.Message = "Inventaire des fichiers…";
 
@@ -284,8 +320,9 @@ namespace EmbySubtitleMerger.Subtitles
                     job.Message = $"{job.Created} .srt {verb}, {job.Renamed} renommage(s), {job.Failures} échec(s).";
                 }
 
-                // Emby doit rescanner pour voir les nouveaux fichiers
-                if (!options.DryRun && job.Changes > 0)
+                // Emby doit rescanner pour voir les nouveaux fichiers. Pour un film seul, la page rafraîchit
+                // déjà l'élément : inutile de faire reparcourir toute la bibliothèque.
+                if (!options.DryRun && job.Changes > 0 && (options.VideoPath == null || options.WholeFolder))
                 {
                     try { afterChanges?.Invoke(); } catch { }
                 }
@@ -331,12 +368,23 @@ namespace EmbySubtitleMerger.Subtitles
             }
 
             return files
+                .Where(f => !IsInsideDiscFolder(f))
                 .Where(f => NormalizeNaming.IsVideo(f) || NormalizeNaming.IsSrt(f) || NormalizeNaming.IsStyledSubtitleFile(f))
                 .Distinct(StringComparer.Ordinal)
                 .GroupBy(f => Path.GetDirectoryName(f) ?? ".", StringComparer.Ordinal)
                 .OrderBy(g => g.Key, StringComparer.OrdinalIgnoreCase)
                 .Select(g => g.OrderBy(f => f, StringComparer.OrdinalIgnoreCase).ToList())
                 .ToList();
+        }
+
+        /// <summary>
+        /// Fichiers d'une copie de DVD ou de Blu-ray (VIDEO_TS, BDMV) : des morceaux de disque, pas des films à sous-titrer
+        /// </summary>
+        private static bool IsInsideDiscFolder(string path)
+        {
+            var separators = new[] { Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar };
+            return (Path.GetDirectoryName(path) ?? string.Empty).Split(separators)
+                .Any(part => part.Equals("VIDEO_TS", StringComparison.OrdinalIgnoreCase) || part.Equals("BDMV", StringComparison.OrdinalIgnoreCase));
         }
 
         /// <summary>
@@ -385,7 +433,7 @@ namespace EmbySubtitleMerger.Subtitles
                     else
                     {
                         MigrateLegacyNames(job, video, files, options);
-                        await ProcessVideoAsync(job, video, files, owners, options, cancellationToken);
+                        await ProcessVideoAsync(job, video, files, options, cancellationToken);
                     }
                 }
                 catch (OperationCanceledException)
@@ -402,29 +450,12 @@ namespace EmbySubtitleMerger.Subtitles
                 job.Processed++;
             }
 
-            // Nettoyage de toutes les médiathèques : les bilingues qui ne portent le nom d'aucune vidéo du dossier
-            if (options.Cleanup && options.CleanupBilingual && options.VideoPath == null)
+            // Nettoyage d'une ou de toutes les médiathèques : les bilingues qui ne portent le nom d'aucune vidéo du dossier
+            if (options.Cleanup && options.CleanupBilingual && options.VideoPath == null && videos.Count > 0)
             {
                 foreach (var srt in files.Where(f => NormalizeNaming.IsSrt(f) && owners.Of(f) == null && NormalizeNaming.IsOrphanBilingual(f)).ToList())
                 {
-                    const string detail = "sous-titre bilingue (aucune vidéo du dossier ne porte exactement ce nom)";
-
-                    if (options.DryRun)
-                    {
-                        job.Add(NormalizeAction.Delete, NormalizeAction.Planned, srt, null, detail);
-                        continue;
-                    }
-
-                    try
-                    {
-                        File.Delete(srt);
-                        files.Remove(srt);
-                        job.Add(NormalizeAction.Delete, NormalizeAction.Done, srt, null, detail);
-                    }
-                    catch (Exception ex)
-                    {
-                        job.Add(NormalizeAction.Delete, NormalizeAction.Failed, srt, null, ex.Message);
-                    }
+                    DeleteFile(job, srt, "sous-titre bilingue (aucune vidéo du dossier ne porte exactement ce nom)", files, options);
                 }
             }
 
@@ -438,7 +469,7 @@ namespace EmbySubtitleMerger.Subtitles
                 // La note s'insère après le nom de la vidéo ; sans vidéo, simple changement d'extension
                 var video = owners.Of(subtitle);
                 var target = video != null
-                    ? NormalizeNaming.PathWithNote(subtitle, video, ".srt")
+                    ? NormalizeNaming.ConvertedExternalPath(subtitle, video)
                     : Path.ChangeExtension(subtitle, ".srt");
 
                 // Sans vidéo, le nom ne porte pas la note : un .srt déjà là peut être celui de l'utilisateur
@@ -448,7 +479,7 @@ namespace EmbySubtitleMerger.Subtitles
                     continue;
                 }
 
-                await ConvertAsync(job, NormalizeAction.Convert, subtitle, null, target, "fichier externe", options, cancellationToken);
+                await ConvertAsync(job, subtitle, null, target, "fichier externe", options, cancellationToken);
                 job.Processed++;
             }
         }
@@ -519,31 +550,14 @@ namespace EmbySubtitleMerger.Subtitles
 
                 foreach (var styled in files.Where(f => NormalizeNaming.IsStyledSubtitleFile(f) && owners.Of(f) == video))
                 {
-                    var expected = NormalizeNaming.PathWithNote(styled, video, ".srt");
+                    var expected = NormalizeNaming.ConvertedExternalPath(styled, video);
                     if (notedNames.Contains(expected))
                         toDelete[expected] = $"conversion de {Path.GetFileName(styled)}";
                 }
             }
 
             foreach (var entry in toDelete.OrderBy(e => e.Key, StringComparer.OrdinalIgnoreCase))
-            {
-                if (options.DryRun)
-                {
-                    job.Add(NormalizeAction.Delete, NormalizeAction.Planned, entry.Key, null, entry.Value);
-                    continue;
-                }
-
-                try
-                {
-                    File.Delete(entry.Key);
-                    files.Remove(entry.Key);
-                    job.Add(NormalizeAction.Delete, NormalizeAction.Done, entry.Key, null, entry.Value);
-                }
-                catch (Exception ex)
-                {
-                    job.Add(NormalizeAction.Delete, NormalizeAction.Failed, entry.Key, null, ex.Message);
-                }
-            }
+                DeleteFile(job, entry.Key, entry.Value, files, options);
 
             if (!options.CleanupNote) return;
 
@@ -569,7 +583,7 @@ namespace EmbySubtitleMerger.Subtitles
             // la normalisation ne la reconnaîtrait plus et la referait
             var externalConversions = new HashSet<string>(
                 files.Where(f => NormalizeNaming.IsStyledSubtitleFile(f) && owners.Of(f) == video)
-                    .Select(f => NormalizeNaming.PathWithNote(f, video, ".srt")),
+                    .Select(f => NormalizeNaming.ConvertedExternalPath(f, video)),
                 StringComparer.Ordinal);
 
             foreach (var srt in notedSrts)
@@ -606,7 +620,6 @@ namespace EmbySubtitleMerger.Subtitles
             NormalizeJob job,
             string video,
             List<string> files,
-            OwnerIndex owners,
             NormalizeOptions options,
             CancellationToken cancellationToken)
         {
@@ -659,7 +672,7 @@ namespace EmbySubtitleMerger.Subtitles
                     continue;
                 }
 
-                conversions.Add(new PendingConversion(NormalizeAction.Convert, track.Index, target, $"piste {track.Codec.ToUpperInvariant()} {track.Language}"));
+                conversions.Add(new PendingConversion(track.Index, target, $"piste {track.Codec.ToUpperInvariant()} {track.Language}"));
             }
 
             await ConvertTracksAsync(job, video, conversions, options, cancellationToken);
@@ -681,9 +694,23 @@ namespace EmbySubtitleMerger.Subtitles
             return SubtitleNaming.Resolve(language)?.Code ?? language.ToLowerInvariant();
         }
 
+        /// <summary>
+        /// Pistes déjà lues, par chemin de vidéo, avec la taille et la date du fichier au moment de la lecture.
+        /// Gardé en mémoire tant qu'Emby tourne ; un échec de lecture n'y entre jamais.
+        /// </summary>
+        private static readonly ConcurrentDictionary<string, ((long Length, long Ticks) Signature, List<SubtitleTrack> Tracks)> ProbeCache =
+            new ConcurrentDictionary<string, ((long Length, long Ticks) Signature, List<SubtitleTrack> Tracks)>(StringComparer.Ordinal);
+
         /// <summary>Pistes de sous-titres de la vidéo, ou null si elle n'a pas pu être lue</summary>
         internal static async Task<List<SubtitleTrack>?> ProbeAsync(NormalizeJob job, string video, CancellationToken cancellationToken)
         {
+            // Une vidéo inchangée (même taille, même date) n'est pas relue : l'exécution qui suit un aperçu,
+            // et la tâche planifiée chaque nuit, ne relancent ffprobe que pour les fichiers nouveaux ou modifiés
+            var file = new FileInfo(video);
+            var signature = file.Exists ? (file.Length, file.LastWriteTimeUtc.Ticks) : (0L, 0L);
+            if (file.Exists && ProbeCache.TryGetValue(video, out var known) && known.Signature == signature)
+                return known.Tracks;
+
             var result = await ExternalTools.RunAsync(FfmpegHelper.FfprobePath, new[]
             {
                 "-v", "error", "-select_streams", "s",
@@ -699,7 +726,9 @@ namespace EmbySubtitleMerger.Subtitles
 
             try
             {
-                return NormalizeNaming.ParseTracks(result.Output);
+                var tracks = NormalizeNaming.ParseTracks(result.Output);
+                if (file.Exists) ProbeCache[video] = (signature, tracks);
+                return tracks;
             }
             catch (Exception ex)
             {
@@ -711,15 +740,13 @@ namespace EmbySubtitleMerger.Subtitles
         /// <summary>Une piste d'une vidéo à convertir en .srt</summary>
         private sealed class PendingConversion
         {
-            public PendingConversion(string kind, int streamIndex, string output, string detail)
+            public PendingConversion(int streamIndex, string output, string detail)
             {
-                Kind = kind;
                 StreamIndex = streamIndex;
                 Output = output;
                 Detail = detail;
             }
 
-            public string Kind { get; }
             public int StreamIndex { get; }
             public string Output { get; }
             public string Detail { get; }
@@ -748,13 +775,22 @@ namespace EmbySubtitleMerger.Subtitles
                 if (grouped.Success)
                 {
                     foreach (var done in todo)
-                        job.Add(done.Kind, NormalizeAction.Done, video, Path.GetFileName(done.Output), done.Detail);
+                        job.Add(NormalizeAction.Convert, NormalizeAction.Done, video, Path.GetFileName(done.Output), done.Detail);
+                    return;
+                }
+
+                // ffmpeg introuvable ou vidéo trop longue à lire : reprendre piste par piste échouerait
+                // de la même façon, en relisant la vidéo autant de fois qu'il y a de pistes
+                if (!grouped.Started || grouped.TimedOut)
+                {
+                    foreach (var failed in todo)
+                        job.Add(NormalizeAction.Convert, NormalizeAction.Failed, video, Path.GetFileName(failed.Output), grouped.Summary);
                     return;
                 }
             }
 
             foreach (var conversion in todo)
-                await ConvertAsync(job, conversion.Kind, video, conversion.StreamIndex, conversion.Output, conversion.Detail, options, cancellationToken);
+                await ConvertAsync(job, video, conversion.StreamIndex, conversion.Output, conversion.Detail, options, cancellationToken);
         }
 
         /// <summary>
@@ -762,7 +798,6 @@ namespace EmbySubtitleMerger.Subtitles
         /// </summary>
         private static async Task ConvertAsync(
             NormalizeJob job,
-            string kind,
             string input,
             int? streamIndex,
             string output,
@@ -777,16 +812,42 @@ namespace EmbySubtitleMerger.Subtitles
 
             if (options.DryRun)
             {
-                job.Add(kind, NormalizeAction.Planned, input, name, detail);
+                job.Add(NormalizeAction.Convert, NormalizeAction.Planned, input, name, detail);
                 return;
             }
 
             var result = await ExternalTools.ConvertToSrtAsync(input, streamIndex, output, cancellationToken);
 
             if (result.Success)
-                job.Add(kind, NormalizeAction.Done, input, name, detail);
+                job.Add(NormalizeAction.Convert, NormalizeAction.Done, input, name, detail);
             else
-                job.Add(kind, NormalizeAction.Failed, input, name, result.Summary);
+                job.Add(NormalizeAction.Convert, NormalizeAction.Failed, input, name, result.Summary);
+        }
+
+        /// <summary>
+        /// Supprime un fichier, ou l'annonce seulement en aperçu
+        /// </summary>
+        private static void DeleteFile(NormalizeJob job, string path, string detail, List<string> files, NormalizeOptions options)
+        {
+            if (options.DryRun)
+            {
+                job.Add(NormalizeAction.Delete, NormalizeAction.Planned, path, null, detail);
+                return;
+            }
+
+            try
+            {
+                File.Delete(path);
+
+                // La liste du dossier suit la suppression, comme pour un renommage
+                files.Remove(path);
+
+                job.Add(NormalizeAction.Delete, NormalizeAction.Done, path, null, detail);
+            }
+            catch (Exception ex)
+            {
+                job.Add(NormalizeAction.Delete, NormalizeAction.Failed, path, null, ex.Message);
+            }
         }
 
         private static void RenameFile(NormalizeJob job, string source, string target, string detail, List<string> files, NormalizeOptions options)

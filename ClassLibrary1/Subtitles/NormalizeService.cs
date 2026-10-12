@@ -59,7 +59,7 @@ namespace EmbySubtitleMerger.Subtitles
         public bool FfmpegAvailable { get; set; }
         public bool FfprobeAvailable { get; set; }
 
-        /// <summary>mkvpropedit (MKVToolNix) : nécessaire seulement pour annoter les pistes des .mkv</summary>
+        /// <summary>mkvpropedit (MKVToolNix) : nécessaire seulement pour retirer la note du titre des pistes des .mkv</summary>
         public bool MkvPropEditAvailable { get; set; }
     }
 
@@ -88,7 +88,7 @@ namespace EmbySubtitleMerger.Subtitles
         /// <summary>Refaire les .srt qui existent déjà</summary>
         public bool Overwrite { get; set; }
 
-        /// <summary>Nettoyer au lieu de normaliser : retire les .srt créés par la normalisation</summary>
+        /// <summary>Nettoyer au lieu de normaliser : retire les fichiers générés, et sur demande les bilingues et la note</summary>
         public bool Cleanup { get; set; }
 
         /// <summary>En nettoyage, retirer aussi les conversions de pistes ASS/SSA (pas seulement les copies de pistes texte)</summary>
@@ -158,6 +158,7 @@ namespace EmbySubtitleMerger.Subtitles
         public int Merged { get; set; }
         public int Unmatched { get; set; }
         public int Translated { get; set; }
+        public string? TranslationEngine { get; set; }
         public int WithoutSubtitle { get; set; }
         public int Processed { get; set; }
         public int Total { get; set; }
@@ -257,35 +258,27 @@ namespace EmbySubtitleMerger.Subtitles
                     if (options.BatchLanguage1.Code == options.BatchLanguage2.Code)
                         return Fail("Choisissez deux langues différentes.");
 
-                    options.BatchMergeOptions = MergeOptions.From(request.MergeMode, request.ToleranceMs, null, null, request.Layout);
+                    options.BatchMergeOptions = MergeOptions.From(request.MergeMode, request.ToleranceMs, request.Layout);
 
                     if (request.BatchTranslate)
                     {
                         // Même moteur et même clé que l'onglet Traduire
-                        var config = Plugin.Instance?.Configuration;
-                        var engine = TranslationEngines.IsKnown(config?.TranslationEngine) ? config!.TranslationEngine : TranslationEngines.Google;
-                        var apiKey = config?.AnthropicApiKey;
-                        var model = config?.TranslationModel;
-
-                        if (engine == TranslationEngines.Claude && string.IsNullOrWhiteSpace(apiKey))
-                            return Fail("Le moteur de traduction choisi est Claude, mais aucune clé API n'est enregistrée (onglet Traduire).");
+                        var settings = TranslationSettings.Resolve();
+                        if (settings.Error != null)
+                            return Fail(settings.Error);
 
                         options.BatchTranslate = true;
-                        options.TranslationEngineName = engine;
-                        options.CreateTranslationEngine = (source, target) => TranslationEngines.Create(engine, apiKey, model, source, target);
+                        options.TranslationEngineName = settings.Engine;
+                        options.CreateTranslationEngine = settings.CreateEngine;
                     }
                 }
 
                 // Les langues ne servent qu'à la normalisation
-                var languageList = string.IsNullOrWhiteSpace(request.Languages) ? DefaultLanguages : request.Languages!;
-                foreach (var code in options.VideosOnly
-                    ? Array.Empty<string>()
-                    : languageList.Split(new[] { ',', ';', ' ' }, StringSplitOptions.RemoveEmptyEntries))
+                if (!options.VideosOnly)
                 {
-                    var language = SubtitleNaming.Resolve(code);
-                    if (language == null)
-                        return Fail($"Langue inconnue: {code}");
-                    options.Languages.Add(language.Code);
+                    var unknown = options.AddLanguages(string.IsNullOrWhiteSpace(request.Languages) ? DefaultLanguages : request.Languages);
+                    if (unknown != null)
+                        return Fail($"Langue inconnue: {unknown}");
                 }
 
                 if (!string.IsNullOrWhiteSpace(request.VideoPath))
@@ -303,6 +296,7 @@ namespace EmbySubtitleMerger.Subtitles
                 var plugin = Plugin.Instance;
                 var chosen = string.Join(",", options.Languages);
                 if (plugin != null && !options.VideosOnly && !options.DryRun && options.VideoPath == null
+                    && string.IsNullOrWhiteSpace(request.LibraryId) && string.IsNullOrWhiteSpace(request.LibraryName)
                     && plugin.Configuration.NormalizeLanguages != chosen)
                 {
                     plugin.Configuration.NormalizeLanguages = chosen;
@@ -314,7 +308,17 @@ namespace EmbySubtitleMerger.Subtitles
                     : new List<string>();
                 if (folders == null)
                     return Fail("Médiathèque introuvable sur le serveur.");
-                var job = JobStore<NormalizeJob>.Add(new NormalizeJob { DryRun = options.DryRun, Cleanup = options.Cleanup, BatchMerge = options.BatchMerge });
+                var job = new NormalizeJob
+                {
+                    DryRun = options.DryRun,
+                    Cleanup = options.Cleanup,
+                    BatchMerge = options.BatchMerge,
+                    TranslationEngine = options.BatchTranslate ? options.TranslationEngineName : null
+                };
+
+                // Une autre tâche (la tâche planifiée, par exemple) a pu démarrer pendant les vérifications
+                if (!JobStore<NormalizeJob>.TryAddExclusive(job, out var started))
+                    return new NormalizeResponse { Success = true, JobId = started!.Id, AlreadyRunning = true };
 
                 Plugin.Log($"[Normalize] Job {job.Id}: {(options.BatchMerge ? "fusion en série" : options.Cleanup ? "nettoyage" : "normalisation")} ({(options.DryRun ? "aperçu" : "exécution")}), "
                     + $"{(options.VideoPath == null ? folders.Count + " dossier(s)" : Path.GetFileName(options.VideoPath))}, "
@@ -353,6 +357,7 @@ namespace EmbySubtitleMerger.Subtitles
                 Merged = job.Merged,
                 Unmatched = job.Unmatched,
                 Translated = job.Translated,
+                TranslationEngine = job.TranslationEngine,
                 WithoutSubtitle = job.WithoutSubtitle,
                 Processed = job.Processed,
                 Total = job.Total,

@@ -21,6 +21,9 @@ namespace EmbySubtitleMerger.Subtitles
         public string Output { get; set; } = string.Empty;
         public string Error { get; set; } = string.Empty;
 
+        /// <summary>true si le programme a été arrêté parce qu'il dépassait le délai accordé</summary>
+        public bool TimedOut { get; set; }
+
         public bool Success => Started && ExitCode == 0;
 
         /// <summary>Message d'erreur court pour l'affichage</summary>
@@ -96,6 +99,7 @@ namespace EmbySubtitleMerger.Subtitles
                     cancellationToken.ThrowIfCancellationRequested();
 
                     result.ExitCode = -1;
+                    result.TimedOut = true;
                     result.Error = $"Délai dépassé ({timeoutSeconds} s)";
                     return result;
                 }
@@ -128,61 +132,68 @@ namespace EmbySubtitleMerger.Subtitles
 
         /// <summary>
         /// Convertit plusieurs pistes d'une même vidéo en un seul passage de ffmpeg.
-        /// Le résultat n'est un succès que si tous les .srt ont été obtenus ; sinon aucun n'est laissé sur le disque.
+        /// Le résultat n'est un succès que si tous les .srt ont été obtenus ; sinon aucun n'est écrit,
+        /// et les fichiers qui existaient déjà sous ces noms restent tels qu'ils étaient.
         /// </summary>
         public static async Task<ToolResult> ConvertToSrtAsync(
             string input,
             IReadOnlyList<(int? StreamIndex, string Output)> outputs,
             CancellationToken cancellationToken = default)
         {
+            // ffmpeg écrit dans des fichiers provisoires, renommés seulement une fois complets et nettoyés.
+            // Une conversion annulée ou en échec ne laisse donc ni .srt tronqué, ni .srt existant abîmé.
+            var pending = outputs.Select(o => (o.StreamIndex, o.Output, Temp: o.Output + ".partiel")).ToList();
+
             var arguments = new List<string> { "-y", "-v", "error", "-i", input };
-            foreach (var (streamIndex, output) in outputs)
+            foreach (var (streamIndex, _, temp) in pending)
             {
                 if (streamIndex.HasValue)
                 {
                     arguments.Add("-map");
                     arguments.Add($"0:{streamIndex.Value}");
                 }
-                arguments.AddRange(new[] { "-c:s", "srt", output });
+                arguments.AddRange(new[] { "-c:s", "srt", "-f", "srt", temp });
             }
 
-            var result = await RunAsync(FfmpegHelper.FfmpegPath, arguments, ConversionTimeoutSeconds, cancellationToken);
-
-            if (result.Success)
+            try
             {
-                try
+                var result = await RunAsync(FfmpegHelper.FfmpegPath, arguments, ConversionTimeoutSeconds, cancellationToken);
+
+                if (result.Success && pending.Any(p => !File.Exists(p.Temp) || new FileInfo(p.Temp).Length == 0))
+                    result.ExitCode = -1;
+
+                if (result.Success)
                 {
-                    foreach (var (_, output) in outputs)
+                    try
                     {
-                        if (!File.Exists(output) || new FileInfo(output).Length == 0)
+                        foreach (var (_, output, temp) in pending)
                         {
-                            result.ExitCode = -1;
-                            break;
+                            var text = File.ReadAllText(temp, Encoding.UTF8);
+                            File.WriteAllText(temp, NormalizeNaming.CleanSrtText(text), new UTF8Encoding(false));
                         }
 
-                        var text = File.ReadAllText(output, Encoding.UTF8);
-                        File.WriteAllText(output, NormalizeNaming.CleanSrtText(text), new UTF8Encoding(false));
+                        foreach (var (_, output, temp) in pending)
+                            File.Move(temp, output, true);
+                    }
+                    catch (Exception ex)
+                    {
+                        result.ExitCode = -1;
+                        result.Error = ex.Message;
                     }
                 }
-                catch (Exception ex)
-                {
-                    result.ExitCode = -1;
-                    result.Error = ex.Message;
-                }
-            }
 
-            if (!result.Success)
-            {
-                foreach (var (_, output) in outputs)
-                {
-                    try { if (File.Exists(output)) File.Delete(output); } catch { }
-                }
-
-                if (result.Started && string.IsNullOrWhiteSpace(result.Summary))
+                if (!result.Success && result.Started && string.IsNullOrWhiteSpace(result.Summary))
                     result.Error = "aucun texte obtenu. Le sous-titre est peut-être au format image (PGS/VobSub).";
-            }
 
-            return result;
+                return result;
+            }
+            finally
+            {
+                foreach (var (_, _, temp) in pending)
+                {
+                    try { if (File.Exists(temp)) File.Delete(temp); } catch { }
+                }
+            }
         }
 
         /// <summary>

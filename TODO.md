@@ -1,11 +1,11 @@
 # À faire
 
-État au 12/10/2026, version 9.17.0. Tout le code est commité sur la branche
+État au 12/10/2026, version 9.18.0. Tout le code est commité sur la branche
 `feature/traduction-nommage-disposition`, fusionnée dans `main` et poussée sur GitHub.
 
 L'utilisateur a confirmé sur le NAS, sans détailler : le plugin se charge (tâche planifiée et
 authentification comprises) et le nettoyage fonctionne, y compris celui des bilingues (9.15.1).
-La version installée sur le NAS est la 9.15.1 (constaté le 12/10/2026) : la 9.17.0 reste à installer.
+La version installée sur le NAS est la 9.15.1 (constaté le 12/10/2026) : la 9.18.0 reste à installer.
 
 ## À vérifier sur le NAS (par l'utilisateur)
 
@@ -42,7 +42,12 @@ La version installée sur le NAS est la 9.15.1 (constaté le 12/10/2026) : la 9.
   Les libellés de la page le disent.
 - **Traduction** : reprise après interruption (les répliques déjà traduites sont gardées 7 jours) ;
   un `Film.xx.srt` existant n'est remplacé que si la case est cochée.
-- **Refusion** : l'ancien `Film.dual.srt` et l'autre forme du même bilingue sont retirés quand le nouveau est créé.
+- **Refusion** : seule l'autre forme du même bilingue (avec ou sans « default ») est retirée quand le nouveau est créé.
+  Un `Film.dual.srt` est laissé : rien ne dit qu'il porte les mêmes langues ; le nettoyage des bilingues le retire sur demande.
+- **Traductions automatiques de la fusion en série** : écrites en `Film.Traduction-auto(moteur).xx.srt`, pour ne pas être
+  confondues avec un sous-titre d'origine. Le nettoyage ne les retire pas encore.
+- **Google Traduction** : le service a refusé les demandes de ce PC après une journée d'essais (12/10/2026). Il bloque donc
+  vite ; le nombre de requêtes par film a été divisé par trois environ en 9.18.0, sans garantie que cela suffise.
 - **Réglages de traduction** (moteur, langue cible, clé Anthropic) : enregistrés sur le serveur ; la clé
   n'est jamais renvoyée au navigateur.
 - **Fusion rapide et userscript** : retirés. Ils ne fonctionnaient qu'avec la clé écrite en dur du PC ;

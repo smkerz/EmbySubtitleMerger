@@ -52,11 +52,30 @@ namespace EmbySubtitleMerger.Subtitles
 
         private static readonly TimeSpan RetentionPeriod = TimeSpan.FromHours(1);
 
+        private static readonly object ExclusiveGate = new object();
+
         public static TJob Add(TJob job)
         {
             PurgeExpired();
             Jobs[job.Id] = job;
             return job;
+        }
+
+        /// <summary>
+        /// Ajoute la tâche seulement si aucune autre n'est en cours. Vérification et ajout se font d'un seul
+        /// tenant : deux demandes simultanées ne peuvent pas démarrer toutes les deux.
+        /// </summary>
+        /// <param name="running">La tâche déjà en cours, quand l'ajout est refusé</param>
+        public static bool TryAddExclusive(TJob job, out TJob? running)
+        {
+            lock (ExclusiveGate)
+            {
+                running = Active();
+                if (running != null) return false;
+
+                Add(job);
+                return true;
+            }
         }
 
         public static TJob? Get(string? id)

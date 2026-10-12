@@ -42,6 +42,16 @@ namespace EmbySubtitleMerger.Subtitles
     }
 
     /// <summary>
+    /// Le moteur de traduction a refusé ou n'a pas pu traiter un lot (quota atteint, clé refusée, service en panne)
+    /// </summary>
+    public class TranslationEngineException : InvalidOperationException
+    {
+        public TranslationEngineException(string message) : base(message)
+        {
+        }
+    }
+
+    /// <summary>
     /// Moteurs de traduction proposés
     /// </summary>
     public static class TranslationEngines
@@ -53,6 +63,17 @@ namespace EmbySubtitleMerger.Subtitles
         public const string Google = "google";
 
         public static bool IsKnown(string? name) => name == Claude || name == Google;
+
+        /// <summary>
+        /// Répliques confiées au moteur à chaque appel. Google découpe lui-même par taille de requête :
+        /// un grand lot lui évite des requêtes presque vides. Claude traduit mieux par lots modérés.
+        /// </summary>
+        public static int BatchSize(string engine, int? requested = null)
+        {
+            return engine == Google
+                ? GoogleTranslateClient.CuesPerCall
+                : Math.Clamp(requested ?? SubtitleTranslator.DefaultBatchSize, 1, 100);
+        }
 
         public static ITranslationEngine Create(string name, string? apiKey, string? model, string? sourceLanguage, string targetLanguage)
         {
@@ -224,7 +245,7 @@ namespace EmbySubtitleMerger.Subtitles
                 var result = await engine.TranslateBatchAsync(batch, context, cancellationToken);
 
                 if (!result.Success)
-                    throw new InvalidOperationException(result.Error ?? "Échec de la traduction du lot.");
+                    throw new TranslationEngineException(result.Error ?? "Échec de la traduction du lot.");
 
                 if (job != null)
                 {

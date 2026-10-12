@@ -1,7 +1,7 @@
 define([], function () {
     'use strict';
 
-    console.log('[SubMerger] Module loaded v9.17.0');
+    console.log('[SubMerger] Module loaded v9.18.0');
 
     var allMovies = [];      // Tous les medias charges
     var filteredMovies = []; // Medias filtres
@@ -16,12 +16,13 @@ define([], function () {
     var normalizeItemId = null;          // Element Emby vise, ou null pour toutes les mediatheques
     var normalizePollTimer = null;
     var normalizePollFailures = 0;
-    var normalizeTarget = 'tab';         // Cartes qui affichent la tache : 'tab' (onglet Normaliser), 'library' (nettoyage de Maintenance), 'batch' (fusion en serie)
+    var normalizeTarget = 'tab';         // Cartes qui affichent la tache : 'tab' (onglet Normaliser), 'allLibraries' (nettoyage de Maintenance, toujours sur tout), 'batch' (fusion en serie)
     var serverHasAnthropicKey = false;   // Une cle Anthropic est enregistree sur le serveur
     var normalizePreview = null;         // Derniere demande d'apercu : "Appliquer" la rejoue a l'identique
     var normalizeJoined = false;         // La tache suivie est celle d'une autre demande, deja en cours
     var normalizeBusy = false;           // Une normalisation ou un nettoyage est lance
-    var normalizeBlocked = false;        // ffmpeg ou ffprobe manque sur le serveur
+    var normalizeBlocked = false;        // ffmpeg ou ffprobe manque sur le serveur : pas de conversion ni de fusion
+    var cleanupBlocked = false;          // ffprobe manque : pas de nettoyage non plus
     var pageVisible = false;             // La page du plugin est affichee
     var mergeTimer = null;               // Minuteur du temps ecoule pendant une fusion
     var mergeJob = null;                 // Id de la fusion en cours cote serveur
@@ -75,7 +76,8 @@ define([], function () {
         return String(text == null ? '' : text)
             .replace(/&/g, '&amp;')
             .replace(/</g, '&lt;')
-            .replace(/>/g, '&gt;');
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;');
     }
 
     // kind: ok, error, warning ou info. html doit deja etre echappe.
@@ -156,6 +158,7 @@ define([], function () {
         apiClient.getJSON(url).then(function(data) {
             libraries = data.Items || [];
             var libSelect = view.querySelector('#libraryFilter');
+            var chosenLibrary = libSelect.value;
             libSelect.innerHTML = '<option value="">Toutes les médiathèques</option>';
 
             for (var i = 0; i < libraries.length; i++) {
@@ -168,6 +171,9 @@ define([], function () {
                     libSelect.appendChild(opt);
                 }
             }
+            // La liste est rechargee a chaque affichage de la page : le choix en cours est conserve
+            libSelect.value = chosenLibrary;
+            if (libSelect.value !== chosenLibrary) libSelect.value = '';
             console.log('[SubMerger] Libraries loaded:', libraries.length);
         }).catch(function(e) {
             console.error('[SubMerger] Error loading libraries:', e);
@@ -725,7 +731,7 @@ define([], function () {
         });
     }
 
-    // ---------- Traduction (API Claude) ----------
+    // ---------- Traduction ----------
 
     function setTranslateRunning(view, running) {
         var btnTranslate = view.querySelector('#btnTranslate');
@@ -784,10 +790,20 @@ define([], function () {
         view.querySelector('#engineHelpGoogle').style.display = claude ? 'none' : 'block';
     }
 
+    // Le moteur et la langue cible servent aussi a la fusion en serie : ils sont enregistres des qu'ils changent,
+    // pour que le serveur utilise bien ce que la page affiche
+    function saveTranslationChoice(view) {
+        saveSettings(view, {
+            TranslationEngine: view.querySelector('#translateEngine').value,
+            DefaultTargetLanguage: view.querySelector('#targetLanguage').value
+        });
+    }
+
     function applySettings(view, data) {
         if (!data || !data.Success) return;
 
         serverHasAnthropicKey = !!data.HasAnthropicKey;
+        view.querySelector('#clearAnthropicKey').style.display = serverHasAnthropicKey ? 'inline-block' : 'none';
         view.querySelector('#anthropicApiKey').placeholder = serverHasAnthropicKey
             ? 'Clé enregistrée (laisser vide pour la garder)'
             : 'sk-ant-...';
@@ -821,7 +837,9 @@ define([], function () {
                 try { legacyKey = localStorage.getItem('anthropic_api_key'); } catch (e) { }
                 if (legacyKey && !serverHasAnthropicKey) {
                     saveSettings(view, { AnthropicApiKey: legacyKey }).then(function (saved) {
-                        if (saved && saved.HasAnthropicKey) localStorage.removeItem('anthropic_api_key');
+                        if (saved && saved.HasAnthropicKey) {
+                            try { localStorage.removeItem('anthropic_api_key'); } catch (e) { }
+                        }
                     });
                 }
             })
@@ -850,18 +868,21 @@ define([], function () {
         }
 
 
-        // Le moteur, la langue et la cle sont enregistres sur le serveur : ils suivent d'un navigateur a l'autre.
-        // Un champ de cle vide garde la cle deja enregistree.
+        // Le moteur et la langue sont enregistres sur le serveur des qu'ils changent (saveTranslationChoice).
+        // La cle n'est lue que pour Claude : le champ est masque avec Google, et un gestionnaire de mots de
+        // passe pourrait l'avoir rempli. Un champ vide garde la cle deja enregistree.
         var engine = view.querySelector('#translateEngine').value;
-        var anthropicKey = view.querySelector('#anthropicApiKey').value.trim();
-        var settings = { TranslationEngine: engine, DefaultTargetLanguage: view.querySelector('#targetLanguage').value };
-        if (anthropicKey) settings.AnthropicApiKey = anthropicKey;
-        saveSettings(view, settings);
+        var anthropicKey = engine === 'claude' ? view.querySelector('#anthropicApiKey').value.trim() : '';
 
+        if (anthropicKey && anthropicKey.indexOf('sk-ant-') !== 0) {
+            showMessage(view, '#translateResult', 'warning', 'Cette clé ne ressemble pas à une clé API Anthropic (elle doit commencer par sk-ant-).');
+            return;
+        }
         if (engine === 'claude' && !anthropicKey && !serverHasAnthropicKey) {
             showMessage(view, '#translateResult', 'warning', 'Le moteur Claude demande une clé API Anthropic. Sans clé, choisissez Google Traduction (gratuit).');
             return;
         }
+        if (anthropicKey) saveSettings(view, { AnthropicApiKey: anthropicKey });
 
         var itemId = currentMovie.Id;
 
@@ -980,7 +1001,6 @@ define([], function () {
         });
     }
 
-    // ---------- Renommage des anciens .dual.srt ----------
 
     // ---------- Normalisation (ASS/SSA vers SRT) ----------
 
@@ -1003,6 +1023,7 @@ define([], function () {
                 }
 
                 normalizeBlocked = blocking;
+                cleanupBlocked = !data.FfprobeAvailable;
                 refreshNormalizeButtons(view);
 
                 box.className = 'status-box ' + (blocking ? 'status-error' : 'status-warning');
@@ -1022,7 +1043,7 @@ define([], function () {
             result: '#normalizeResult', cleanupApply: '#btnCleanupApply',
             conversions: '#cleanupConversions', bilingual: '#cleanupBilingual', note: '#cleanupNote'
         },
-        library: {
+        allLibraries: {
             progress: '#libProgress', bar: '#libProgressBar', label: '#libProgressLabel',
             result: '#libResult', cleanupApply: '#btnLibCleanupApply',
             conversions: '#libCleanupConversions', bilingual: '#libCleanupBilingual', note: '#libCleanupNote'
@@ -1042,7 +1063,9 @@ define([], function () {
     // Les boutons sont grises pendant une tache, et tant que ffmpeg ou ffprobe manque
     function refreshNormalizeButtons(view) {
         ['#btnNormalizePreview', '#btnCleanupPreview', '#btnLibCleanupPreview', '#btnBatchPreview'].concat(NORMALIZE_APPLY_BUTTONS).forEach(function (selector) {
-            view.querySelector(selector).disabled = normalizeBusy || normalizeBlocked;
+            // Le nettoyage ne convertit rien : il lui suffit de ffprobe
+            var blocked = /Cleanup/.test(selector) ? cleanupBlocked : normalizeBlocked;
+            view.querySelector(selector).disabled = normalizeBusy || blocked;
         });
     }
 
@@ -1071,7 +1094,7 @@ define([], function () {
     }
 
     // cleanup = true : retire les .srt generes au lieu d'en creer
-    // fromLibrary = true : nettoyage de l'onglet Maintenance, toujours sur toutes les mediatheques
+    // target : 'tab' (defaut), 'allLibraries' ou 'batch' ; voir normalizeTarget
     function startNormalize(view, dryRun, cleanup, target) {
         var preview = normalizePreview;
         var body;
@@ -1080,7 +1103,7 @@ define([], function () {
             normalizeTarget = target || 'tab';
 
             var batch = normalizeTarget === 'batch';
-            var scope = normalizeTarget === 'library' ? 'all' : view.querySelector(batch ? '#batchScope' : '#normalizeScope').value;
+            var scope = normalizeTarget === 'allLibraries' ? 'all' : view.querySelector(batch ? '#batchScope' : '#normalizeScope').value;
 
             // Une seule médiathèque : celle de la liste en haut de la page
             var librarySelect = view.querySelector('#libraryFilter');
@@ -1093,7 +1116,7 @@ define([], function () {
             // wholeLibrary : le traitement ne porte pas sur un film précis
             var wholeLibrary = scope === 'all' || oneLibrary;
             if (!wholeLibrary && !currentMovie) {
-                normalizeUi(view, 'result').innerHTML = statusBox('warning', 'Sélectionnez d\'abord un film ou un épisode, ou choisissez "Toutes les médiathèques".');
+                normalizeUi(view, 'result').innerHTML = statusBox('warning', 'Sélectionnez d\'abord un film ou un épisode, ou choisissez un périmètre plus large.');
                 return;
             }
 
@@ -1240,10 +1263,21 @@ define([], function () {
             var without = (data.Unmatched > 0 ? ' ' + data.Unmatched + ' vidéo(s) n\'ont pas les deux langues.' : '')
                 + (data.WithoutSubtitle > 0 ? ' ' + data.WithoutSubtitle + ' vidéo(s) n\'ont aucun sous-titre texte.' : '')
                 + (!data.DryRun && data.Translated > 0 ? ' ' + data.Translated + ' sous-titre(s) traduit(s).' : '');
+
+            // L'apercu dit ce que l'execution lancera : combien de traductions, avec quel moteur
+            var engineName = data.TranslationEngine === 'claude' ? 'Claude (payant)' : 'Google Traduction';
+            var planned = data.DryRun && data.Translated > 0
+                ? ' Dont ' + data.Translated + ' traduction(s) à faire avec ' + engineName + '.'
+                : '';
+            var layoutSelect = view.querySelector('#layout');
+            var reminder = data.DryRun
+                ? ' Disposition : ' + layoutSelect.options[layoutSelect.selectedIndex].textContent.toLowerCase()
+                    + (view.querySelector('#mergeDefault').checked ? ', bilingues marqués par défaut' : '') + '.'
+                : '';
             if (changes === 0 && data.Failures === 0) {
                 summary = 'Rien à créer sur ' + data.Total + ' vidéo(s) : les bilingues existent déjà, ou les deux langues manquent.' + without;
             } else if (data.DryRun) {
-                summary = 'Aperçu : ' + data.Merged + ' bilingue(s) à créer sur ' + data.Total + ' vidéo(s).' + without;
+                summary = 'Aperçu : ' + data.Merged + ' bilingue(s) à créer sur ' + data.Total + ' vidéo(s).' + planned + without + reminder;
             } else {
                 summary = data.Merged + ' bilingue(s) créé(s), ' + data.Failures + ' échec(s).' + without;
                 if (changes > 0) summary += ' Analyse de la médiathèque demandée.';
@@ -1288,14 +1322,16 @@ define([], function () {
             : '';
 
         var joined = normalizeJoined
-            ? statusBox('warning', 'Une autre normalisation ou un autre nettoyage était déjà en cours : voici son résultat. Relancez votre demande.')
+            ? statusBox('warning', 'Une autre tâche (normalisation, nettoyage ou fusion en série) était déjà en cours : voici son résultat. Relancez votre demande.')
             : '';
 
         box.innerHTML = joined + statusBox(data.Failures > 0 ? 'warning' : 'ok', '<strong>' + summary + '</strong>') + rows + listed;
 
         // Le bouton d'execution n'apparait qu'apres un apercu qui a quelque chose a faire,
         // et seulement si cet apercu est bien celui de la demande memorisee
-        btnApply.style.display = (data.DryRun && changes > 0 && normalizePreview && !normalizeJoined) ? 'inline-block' : 'none';
+        if (btnApply) {
+            btnApply.style.display = (data.DryRun && changes > 0 && normalizePreview && !normalizeJoined) ? 'inline-block' : 'none';
+        }
 
         // Apres une vraie operation sur un seul film, ses pistes sont rechargees
         if (!data.DryRun && changes > 0 && normalizeItemId) {
@@ -1355,8 +1391,8 @@ define([], function () {
         on('#btnCleanupPreview', 'click', function () { startNormalize(view, true, true); });
         on('#btnCleanupApply', 'click', function () { startNormalize(view, false, true); });
         on('#btnNormalizeCancel', 'click', function () { cancelNormalize(); });
-        on('#btnLibCleanupPreview', 'click', function () { startNormalize(view, true, true, 'library'); });
-        on('#btnLibCleanupApply', 'click', function () { startNormalize(view, false, true, 'library'); });
+        on('#btnLibCleanupPreview', 'click', function () { startNormalize(view, true, true, 'allLibraries'); });
+        on('#btnLibCleanupApply', 'click', function () { startNormalize(view, false, true, 'allLibraries'); });
         on('#btnBatchPreview', 'click', function () { startNormalize(view, true, false, 'batch'); });
         on('#btnBatchApply', 'click', function () { startNormalize(view, false, false, 'batch'); });
         on('#btnBatchCancel', 'click', function () { cancelNormalize(); });
@@ -1369,12 +1405,18 @@ define([], function () {
         view.querySelector('#batchLang2').value = 'fr';
         on('#btnLibCancel', 'click', function () { cancelNormalize(); });
         on('#btnMergeCancel', 'click', function () { cancelMerge(); });
-        on('#translateEngine', 'change', function () { showTranslateEngine(view); });
+        on('#translateEngine', 'change', function () { showTranslateEngine(view); saveTranslationChoice(view); });
+        on('#targetLanguage', 'change', function () { saveTranslationChoice(view); });
+        on('#clearAnthropicKey', 'click', function (event) {
+            event.preventDefault();
+            view.querySelector('#anthropicApiKey').value = '';
+            saveSettings(view, { AnthropicApiKey: '' });
+        });
 
         ['#normalizeScope', '#normalizeLanguages', '#normalizeOverwrite',
             '#cleanupConversions', '#cleanupBilingual', '#cleanupNote',
             '#libCleanupConversions', '#libCleanupBilingual', '#libCleanupNote',
-            '#batchLang1', '#batchLang2', '#batchScope', '#batchTranslate', '#libraryFilter', '#layout', '#mergeMode', '#mergeDefault',
+            '#batchLang1', '#batchLang2', '#batchScope', '#batchTranslate', '#libraryFilter', '#tolerance', '#translateEngine', '#layout', '#mergeMode', '#mergeDefault',
             '#moviesSelect', '#versionSelect'].forEach(function (selector) {
             on(selector, 'change', function () { invalidateNormalizePreview(view); });
             on(selector, 'input', function () { invalidateNormalizePreview(view); });
@@ -1394,7 +1436,7 @@ define([], function () {
     }
 
     return function (view) {
-        console.log('[SubMerger] Controller init v9.17.0');
+        console.log('[SubMerger] Controller init v9.18.0');
 
         var bound = false;
 

@@ -39,22 +39,19 @@ namespace EmbySubtitleMerger.Subtitles
 
         public async Task Execute(CancellationToken cancellationToken, IProgress<double> progress)
         {
-            // Une normalisation ou un nettoyage lancé depuis la page a la priorité
-            if (JobStore<NormalizeJob>.Active() != null)
+
+            var options = new NormalizeOptions { DryRun = false };
+            // Un code devenu inconnu est simplement ignoré : la tâche tourne sans personne pour lire une erreur
+            options.AddLanguages(Plugin.Instance?.Configuration.NormalizeLanguages ?? PluginConfiguration.DefaultNormalizeLanguages);
+
+            // Une normalisation, un nettoyage ou une fusion en série lancé depuis la page a la priorité
+            var job = new NormalizeJob { DryRun = false };
+            if (!JobStore<NormalizeJob>.TryAddExclusive(job, out _))
             {
                 Plugin.Log("[Normalize] Tâche planifiée ignorée : une autre tâche est déjà en cours");
                 return;
             }
 
-            var options = new NormalizeOptions { DryRun = false };
-            var languages = Plugin.Instance?.Configuration.NormalizeLanguages ?? PluginConfiguration.DefaultNormalizeLanguages;
-            foreach (var code in languages.Split(new[] { ',', ';', ' ' }, StringSplitOptions.RemoveEmptyEntries))
-            {
-                var language = SubtitleNaming.Resolve(code);
-                if (language != null) options.Languages.Add(language.Code);
-            }
-
-            var job = JobStore<NormalizeJob>.Add(new NormalizeJob { DryRun = false });
             Plugin.Log($"[Normalize] Tâche planifiée {job.Id}, langues {string.Join(",", options.Languages)}");
 
             using var registration = cancellationToken.Register(() => job.Cancellation.Cancel());

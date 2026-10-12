@@ -34,6 +34,9 @@ namespace EmbySubtitleMerger.Subtitles
             /// <summary>Langue de la piste, si elle est connue</summary>
             public LanguageInfo? Language { get; set; }
 
+            /// <summary>Traduction automatique d'une série précédente : jamais préférée comme texte à traduire</summary>
+            public bool IsAutoTranslation { get; set; }
+
             /// <summary>Description pour le compte rendu</summary>
             public string Label { get; set; } = string.Empty;
         }
@@ -46,15 +49,23 @@ namespace EmbySubtitleMerger.Subtitles
         {
             var stem = Path.GetFileNameWithoutExtension(videoPath);
             var name = Path.GetFileName(srtPath);
-            var forced = name.Contains("forced", StringComparison.OrdinalIgnoreCase);
 
             if (!name.StartsWith(stem + ".", StringComparison.Ordinal))
-                return (null, forced);
+                return (null, false);
 
-            var words = name.Substring(stem.Length + 1).Split('.');
+            // Tout se lit après le nom de la vidéo : "Forced.Vengeance.2018.en.srt" n'est pas une piste forced
+            var suffix = name.Substring(stem.Length + 1);
+            var forced = suffix.Contains("forced", StringComparison.OrdinalIgnoreCase);
+
+            var words = suffix.Split('.');
             for (var i = words.Length - 2; i >= 0; i--)
             {
-                if (NameFlags.Contains(words[i])) continue;
+                // "hi" est le hindi, sauf derrière un code de langue où il veut dire "malentendants" : Film.en.hi.srt
+                var isFlag = words[i].Equals("hi", StringComparison.OrdinalIgnoreCase)
+                    ? i > 0 && SubtitleNaming.Resolve(words[i - 1]) != null
+                    : NameFlags.Contains(words[i]);
+                if (isFlag) continue;
+
                 return (SubtitleNaming.Resolve(words[i]), forced);
             }
 
@@ -70,9 +81,9 @@ namespace EmbySubtitleMerger.Subtitles
         {
             var externals = ownedSrts
                 .Where(srt => !NormalizeNaming.IsBilingual(srt, video))
-                .Select(srt => (Path: srt, Info: DescribeExternal(srt, video)))
+                .Select(srt => (Path: srt, Info: DescribeExternal(srt, video), Auto: NormalizeNaming.IsAutoTranslation(srt, video)))
                 .Where(e => !e.Info.Forced)
-                .OrderBy(e => NormalizeNaming.HasNote(e.Path) ? 1 : 0)
+                .OrderBy(e => e.Auto ? 2 : NormalizeNaming.HasNote(e.Path) ? 1 : 0)
                 .ThenBy(e => e.Path, StringComparer.OrdinalIgnoreCase);
 
             foreach (var external in externals)
@@ -81,7 +92,9 @@ namespace EmbySubtitleMerger.Subtitles
                 {
                     IsExternal = true,
                     Path = external.Path,
-                    Language = external.Info.Language,
+                    // Un nom sans code de langue ("Film.srt") : la langue est lue dans le texte
+                    Language = external.Info.Language ?? DetectLanguage(external.Path),
+                    IsAutoTranslation = external.Auto,
                     Label = Path.GetFileName(external.Path)
                 };
             }
@@ -99,6 +112,18 @@ namespace EmbySubtitleMerger.Subtitles
                     Language = SubtitleNaming.Resolve(track.Language),
                     Label = $"piste {track.Number} ({track.Codec}{(track.Title.Length > 0 ? ", " + track.Title : string.Empty)})"
                 };
+            }
+        }
+
+        private static LanguageInfo? DetectLanguage(string srtPath)
+        {
+            try
+            {
+                return SubtitleNaming.Resolve(LanguageDetector.DetectSingle(SrtParser.ParseFile(srtPath)));
+            }
+            catch
+            {
+                return null;
             }
         }
 
@@ -154,7 +179,12 @@ namespace EmbySubtitleMerger.Subtitles
                     return;
                 }
 
-                source = first ?? second ?? Usable(video, ownedSrts, tracks).FirstOrDefault();
+                // On traduit de préférence un sous-titre d'origine : traduire une traduction dégrade le texte
+                var present = new[] { first, second }.Where(c => c != null).Select(c => c!).ToList();
+                source = present.FirstOrDefault(c => !c.IsAutoTranslation)
+                    ?? Usable(video, ownedSrts, tracks).FirstOrDefault(c => !c.IsAutoTranslation)
+                    ?? present.FirstOrDefault()
+                    ?? Usable(video, ownedSrts, tracks).FirstOrDefault();
                 if (source == null)
                 {
                     job.CountWithoutSubtitle();
@@ -176,6 +206,13 @@ namespace EmbySubtitleMerger.Subtitles
 
             if (options.DryRun)
             {
+                // L'aperçu annonce les traductions qui seraient lancées : elles prennent du temps, et coûtent avec Claude
+                if (source != null)
+                {
+                    if (first == null) job.CountTranslation();
+                    if (second == null) job.CountTranslation();
+                }
+
                 job.Add(NormalizeAction.Merge, NormalizeAction.Planned, video, name, detail);
                 return;
             }
@@ -218,21 +255,28 @@ namespace EmbySubtitleMerger.Subtitles
                         return;
                     }
 
+                    // Répliques d'une langue : celles de la source si elle est dans cette langue ou si c'est
+                    // la piste trouvée, sinon celles d'une autre piste trouvée, sinon une traduction de la source
+                    async Task<List<SubtitleCue>> CuesForAsync(Candidate? found, LanguageInfo language)
+                    {
+                        if (found == source) return cues;
+                        if (found != null) return await LoadAsync(video, found, cancellationToken);
+                        return await TranslateAsync(job, video, cues, source.Language, language, options, cancellationToken);
+                    }
+
                     try
                     {
-                        primary = first != null ? cues : await TranslateAsync(job, video, cues, source.Language, language1, options, cancellationToken);
-                        secondary = second != null ? cues : await TranslateAsync(job, video, cues, source.Language, language2, options, cancellationToken);
+                        primary = await CuesForAsync(first, language1);
+                        secondary = await CuesForAsync(second, language2);
                         job.TranslationFailuresInARow = 0;
                     }
-                    catch (OperationCanceledException)
-                    {
-                        throw;
-                    }
-                    catch (Exception ex)
+                    catch (Exception ex) when (ex is not OperationCanceledException)
                     {
                         job.Add(NormalizeAction.Merge, NormalizeAction.Failed, video, name, "traduction impossible : " + ex.Message);
 
-                        if (++job.TranslationFailuresInARow >= MaxTranslationFailuresInARow)
+                        // Seul un refus du moteur (quota, clé) annonce que les suivantes échoueront aussi ;
+                        // un fichier illisible ou un dossier protégé ne concerne que cette vidéo
+                        if (ex is TranslationEngineException && ++job.TranslationFailuresInARow >= MaxTranslationFailuresInARow)
                         {
                             job.TranslationHalted = true;
                             job.Add(NormalizeAction.Info, NormalizeAction.Failed, video, null,
@@ -252,8 +296,9 @@ namespace EmbySubtitleMerger.Subtitles
 
                 SrtParser.WriteFile(output, merged);
 
-                // Le même bilingue sous l'autre forme (avec ou sans "default") ferait doublon dans Emby
-                if (File.Exists(otherForm)) File.Delete(otherForm);
+                // Le même bilingue sous l'autre forme (avec ou sans "default") ferait doublon dans Emby.
+                // Ne pas réussir à le retirer ne fait pas échouer la fusion, qui est écrite.
+                try { if (File.Exists(otherForm)) File.Delete(otherForm); } catch { }
 
                 job.Add(NormalizeAction.Merge, NormalizeAction.Done, video, name, $"{detail} ({merged.Count} répliques)");
             }
@@ -274,7 +319,8 @@ namespace EmbySubtitleMerger.Subtitles
 
         /// <summary>
         /// Traduit un sous-titre dans une langue. La traduction est aussi gardée à côté de la vidéo
-        /// ("Film.fr.srt") : elle sert de sous-titre à part entière, et ne sera pas refaite la prochaine fois.
+        /// ("Film.Traduction-auto(google).fr.srt") : elle sert de sous-titre à part entière, ne sera pas refaite
+        /// la prochaine fois, et sa note empêche de la confondre avec un sous-titre d'origine.
         /// </summary>
         private static async Task<List<SubtitleCue>> TranslateAsync(
             NormalizeJob job,
@@ -292,15 +338,33 @@ namespace EmbySubtitleMerger.Subtitles
             // Une série interrompue reprend la traduction en cours là où elle s'était arrêtée
             var checkpoint = TranslationCheckpoint.Open(cues, target.Code, options.TranslationEngineName);
             var translated = await SubtitleTranslator.TranslateCuesAsync(
-                cues, engine, SubtitleTranslator.DefaultBatchSize, null, cancellationToken, checkpoint);
-            checkpoint.Delete();
+                cues, engine, TranslationEngines.BatchSize(options.TranslationEngineName), null, cancellationToken, checkpoint);
 
-            var single = SubtitleNaming.SinglePath(video, target);
-            if (!File.Exists(single))
-                SrtParser.WriteFile(single, translated);
+            // Le point de reprise n'est effacé qu'une fois la traduction écrite : si le dossier refuse
+            // l'écriture, relancer ne la repaie pas
+            SrtParser.WriteFile(NormalizeNaming.AutoTranslationPath(video, target.Code, options.TranslationEngineName), translated);
+            checkpoint.Delete();
 
             job.CountTranslation();
             return translated;
+        }
+
+        /// <summary>Répliques d'une piste retenue</summary>
+        private static async Task<List<SubtitleCue>> LoadAsync(string video, Candidate candidate, CancellationToken cancellationToken)
+        {
+            var source = await SubtitleSource.AcquireAsync(
+                video, candidate.IsExternal, candidate.Path, candidate.Index, "sous-titre", cancellationToken);
+            if (!source.Success)
+                throw new IOException(source.Error);
+
+            try
+            {
+                return SrtParser.ParseFile(source.Path);
+            }
+            finally
+            {
+                source.Cleanup();
+            }
         }
     }
 }

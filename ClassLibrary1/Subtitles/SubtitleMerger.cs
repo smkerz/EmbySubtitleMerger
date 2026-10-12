@@ -40,12 +40,6 @@ namespace EmbySubtitleMerger.Subtitles
         /// <summary>Tolérance en millisecondes pour considérer deux cues comme simultanés</summary>
         public int ToleranceMs { get; set; } = 700;
         
-        /// <summary>Couleur du sous-titre primaire (langue 1) - format ASS/HTML</summary>
-        public string? PrimaryColor { get; set; }
-
-        /// <summary>Couleur du sous-titre secondaire (langue 2)</summary>
-        public string? SecondaryColor { get; set; }
-
         /// <summary>Disposition des deux langues à l'écran</summary>
         public DualLayout Layout { get; set; } = DualLayout.TopBottom;
 
@@ -53,14 +47,12 @@ namespace EmbySubtitleMerger.Subtitles
         /// Construit les options à partir des valeurs reçues d'une requête.
         /// Une tolérance absente garde la valeur par défaut.
         /// </summary>
-        public static MergeOptions From(string? mode, int? toleranceMs, string? color1, string? color2, string? layout)
+        public static MergeOptions From(string? mode, int? toleranceMs, string? layout)
         {
             var options = new MergeOptions
             {
                 Mode = SubtitleMerger.ParseMode(mode),
-                Layout = SubtitleMerger.ParseLayout(layout),
-                PrimaryColor = color1,
-                SecondaryColor = color2
+                Layout = SubtitleMerger.ParseLayout(layout)
             };
 
             if (toleranceMs.HasValue)
@@ -399,7 +391,7 @@ namespace EmbySubtitleMerger.Subtitles
                     paired.Contains(s) || !primary.Any(p => CuesOverlap(p, s, toleranceTicks)));
             }
 
-            IEnumerable<SubtitleCue> Track(IEnumerable<SubtitleCue> cues, string prefix, string? color)
+            IEnumerable<SubtitleCue> Track(IEnumerable<SubtitleCue> cues, string prefix)
             {
                 foreach (var cue in cues)
                 {
@@ -410,13 +402,13 @@ namespace EmbySubtitleMerger.Subtitles
                     {
                         StartTime = cue.StartTime,
                         EndTime = cue.EndTime,
-                        Text = prefix + Colorize(text, color)
+                        Text = prefix + text
                     };
                 }
             }
 
-            var result = Track(top, TopPositionTag, options.PrimaryColor)
-                .Concat(Track(bottom, string.Empty, options.SecondaryColor))
+            var result = Track(top, TopPositionTag)
+                .Concat(Track(bottom, string.Empty))
                 // Tri stable : à minutage égal, la réplique du haut reste avant celle du bas
                 .OrderBy(c => c.StartTime)
                 .ToList();
@@ -425,11 +417,6 @@ namespace EmbySubtitleMerger.Subtitles
                 result[i].Index = i + 1;
 
             return result;
-        }
-
-        private static string Colorize(string text, string? color)
-        {
-            return string.IsNullOrEmpty(color) ? text : $"<font color=\"{color}\">{text}</font>";
         }
 
         /// <summary>
@@ -446,11 +433,11 @@ namespace EmbySubtitleMerger.Subtitles
 
             var primaryText = primary == null ? string.Empty : CleanText(primary);
             if (primaryText.Length > 0)
-                parts.Add(Colorize(primaryText, options.PrimaryColor));
+                parts.Add(primaryText);
 
             var secondaryText = secondary == null ? string.Empty : CleanText(secondary);
             if (secondaryText.Length > 0)
-                parts.Add(Colorize(secondaryText, options.SecondaryColor));
+                parts.Add(secondaryText);
 
             if (parts.Count == 0)
                 return null;
@@ -507,23 +494,6 @@ namespace EmbySubtitleMerger.Subtitles
             
             result.Add(current);
             return result;
-        }
-        
-        /// <summary>
-        /// Fusionne deux fichiers SRT et écrit le résultat
-        /// </summary>
-        public static void MergeFiles(
-            string primaryPath, 
-            string secondaryPath, 
-            string outputPath,
-            MergeOptions? options = null)
-        {
-            var primary = SrtParser.ParseFile(primaryPath);
-            var secondary = SrtParser.ParseFile(secondaryPath);
-            
-            var merged = Merge(primary, secondary, options);
-            
-            SrtParser.WriteFile(outputPath, merged);
         }
     }
 }

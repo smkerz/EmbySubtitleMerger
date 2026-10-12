@@ -5,7 +5,7 @@
 (function() {
     'use strict';
 
-    console.log('[SubMerger] UI Injector loaded v9.17.0');
+    console.log('[SubMerger] UI Injector loaded v9.18.0');
 
     var INJECTOR_ID = 'subtitleMergerSection';
     var currentItemId = null;
@@ -151,7 +151,12 @@
             Fields: 'MediaStreams,Path'
         });
 
-        apiClient.getJSON(url).then(function(item) {
+        // La fusion est reservee aux administrateurs cote serveur : inutile de la proposer aux autres
+        apiClient.getCurrentUser().then(function(user) {
+            if (!user || !user.Policy || !user.Policy.IsAdministrator) return null;
+            return apiClient.getJSON(url);
+        }).then(function(item) {
+            if (!item) return;
             console.log('[SubMerger] Item loaded:', item.Name);
             subtitles = readSubtitles(item);
             injectMergeSection(container, afterElement, item);
@@ -344,7 +349,6 @@
                 Layout: document.getElementById('mergeLayout').value,
                 Mode: document.getElementById('mergeMode').value,
                 ToleranceMs: isNaN(tolerance) ? 700 : tolerance,
-                UseCloudApi: false,
                 Background: true
             })
         })

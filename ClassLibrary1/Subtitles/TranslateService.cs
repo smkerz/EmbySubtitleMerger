@@ -43,7 +43,7 @@ namespace EmbySubtitleMerger.Subtitles
         /// <summary>Modèle à utiliser. À défaut, celui de la configuration du plugin</summary>
         public string? Model { get; set; }
 
-        /// <summary>Nombre de répliques par appel API (1 à 100)</summary>
+        /// <summary>Nombre de répliques par appel au moteur Claude (1 à 100). Google remplit ses requêtes lui-même</summary>
         public int? BatchSize { get; set; }
 
         /// <summary>Remplacer le sous-titre "Film.xx.srt" s'il existe déjà. Sinon la traduction est refusée</summary>
@@ -57,12 +57,6 @@ namespace EmbySubtitleMerger.Subtitles
 
         /// <summary>Tolérance de fusion en ms</summary>
         public int? ToleranceMs { get; set; }
-
-        /// <summary>Couleur de la traduction (langue 1 du bilingue)</summary>
-        public string? Color1 { get; set; }
-
-        /// <summary>Couleur de la source (langue 2 du bilingue)</summary>
-        public string? Color2 { get; set; }
 
         /// <summary>Disposition du bilingue: topbottom (defaut) ou stacked (tout en bas)</summary>
         public string? Layout { get; set; }
@@ -132,7 +126,7 @@ namespace EmbySubtitleMerger.Subtitles
 
                 var config = Plugin.Instance?.Configuration;
 
-                var targetCode = FirstNonBlank(request.TargetLanguage, config?.DefaultTargetLanguage);
+                var targetCode = TranslationSettings.FirstNonBlank(request.TargetLanguage, config?.DefaultTargetLanguage);
                 if (targetCode == null)
                     return Fail("Langue cible requise.");
 
@@ -141,13 +135,13 @@ namespace EmbySubtitleMerger.Subtitles
                 if (target == null)
                     return Fail($"Langue cible inconnue: {targetCode}");
 
-                var engine = (FirstNonBlank(request.Engine, config?.TranslationEngine) ?? TranslationEngines.Google).Trim().ToLowerInvariant();
-                if (!TranslationEngines.IsKnown(engine))
-                    return Fail($"Moteur de traduction inconnu: {request.Engine}");
+                var settings = TranslationSettings.Resolve(request.Engine, request.AnthropicApiKey, request.Model);
+                if (settings.Error != null)
+                    return Fail(settings.Error);
 
-                var apiKey = FirstNonBlank(request.AnthropicApiKey, config?.AnthropicApiKey);
-                if (engine == TranslationEngines.Claude && apiKey == null)
-                    return Fail("Clé API Anthropic requise.");
+                var engine = settings.Engine;
+                var apiKey = settings.ApiKey;
+                var model = settings.Model;
 
                 var sourceLanguage = SubtitleNaming.Resolve(request.SourceLanguage);
                 if (sourceLanguage != null && sourceLanguage.Code == target.Code)
@@ -161,9 +155,7 @@ namespace EmbySubtitleMerger.Subtitles
                 if (File.Exists(outputPath) && !request.Overwrite)
                     return Fail($"{Path.GetFileName(outputPath)} existe déjà. Cochez « Remplacer le sous-titre existant » pour l'écraser.");
 
-                var batchSize = Math.Clamp(
-                    request.BatchSize ?? config?.TranslationBatchSize ?? SubtitleTranslator.DefaultBatchSize, 1, 100);
-                var model = FirstNonBlank(request.Model, config?.TranslationModel);
+                var batchSize = TranslationEngines.BatchSize(engine, request.BatchSize);
 
                 // Le job ne garde que ce dont il a besoin, pas la requête entière
                 var videoPath = request.VideoPath;
@@ -172,7 +164,7 @@ namespace EmbySubtitleMerger.Subtitles
                 var sourceIndex = request.SourceIndex;
                 var sourceCode = request.SourceLanguage;
                 var mergeOptions = request.ThenMerge
-                    ? MergeOptions.From(request.MergeMode, request.ToleranceMs, request.Color1, request.Color2, request.Layout)
+                    ? MergeOptions.From(request.MergeMode, request.ToleranceMs, request.Layout)
                     : null;
 
                 var job = JobStore<TranslationJob>.Add(new TranslationJob());
@@ -243,12 +235,6 @@ namespace EmbySubtitleMerger.Subtitles
         private static TranslateSubtitleResponse Fail(string error)
         {
             return new TranslateSubtitleResponse { Success = false, Error = error };
-        }
-
-        private static string? FirstNonBlank(string? first, string? second)
-        {
-            if (!string.IsNullOrWhiteSpace(first)) return first;
-            return string.IsNullOrWhiteSpace(second) ? null : second;
         }
 
         /// <summary>

@@ -108,6 +108,16 @@ EmbySubtitleMerger/
 
 ## Changelog
 
+### v9.18
+- Clean-up only recognises known bilingual name forms; conversions go through temporary files, so a cancelled run leaves no truncated subtitle
+- Batch merge: automatic translations are stored as `Movie.Traduction-auto(engine).xx.srt` and never used as a translation source when an original exists; the preview announces the translations and the engine
+- Google engine sends about three times fewer requests
+
+### v9.13 – v9.17
+- Batch merge can translate the missing language(s); scope "selected library"
+- Removed tools that had become useless: legacy rename, note tagging, text track extraction, DoubleSub.io cloud mode
+- French accents in the page
+
 ### v9.12
 - Batch merge for a folder or all libraries
 - Normalisation reads each video once, whatever the number of tracks
@@ -115,7 +125,6 @@ EmbySubtitleMerger/
 
 ### v9.11
 - Endpoints require an administrator session; removed the pages that embedded an Emby API key
-- Legacy bilingual files the rename tool cannot identify can be set aside
 - Translation resumes after an interruption; "default" option for bilingual files
 
 ### v9.10
