@@ -1,35 +1,35 @@
 # À faire
 
-État au 11/10/2026, version 9.15.0. Tout le code est commité sur la branche
-`feature/traduction-nommage-disposition`. La dernière version installée sur le NAS est plus ancienne :
-presque rien de ce qui suit n'a encore tourné dans le vrai Emby.
+État au 12/10/2026, version 9.16.0. Tout le code est commité sur la branche
+`feature/traduction-nommage-disposition`, non poussée et non fusionnée dans `main`.
+
+L'utilisateur a confirmé sur le NAS, sans détailler : le plugin se charge (tâche planifiée et
+authentification comprises) et le nettoyage fonctionne, y compris celui des bilingues (9.15.1).
+Le reste n'a pas de retour explicite.
 
 ## À vérifier sur le NAS (par l'utilisateur)
 
-- [ ] **Installer la 9.15.0** et vérifier que le plugin se charge. S'il ne se charge plus, les deux premiers
-      suspects sont la tâche planifiée (`NormalizeScheduledTask`) et l'authentification des adresses
-      (`[Authenticated(Roles = "Admin")]`), ajoutées sans pouvoir être essayées dans Emby.
+- [ ] **Fusion en série avec traduction automatique** (9.16.0) : jamais exécutée avec un vrai moteur.
+      Commencer par l'aperçu sur une saison.
 - [ ] **Fusion** sur un gros film (Les Deux Tours) : l'erreur « not valid JSON » doit avoir disparu.
 - [ ] **TV Samsung** : disposition haut/bas sur une fusion refaite. Si une seule langue s'affiche,
       utiliser « Les deux en bas ».
 - [ ] **Traduction** : un épisode court avec Google Traduction ; Claude n'a jamais fait d'appel réel.
-- [ ] **Nettoyage** : aperçu puis exécution sur un seul film, dont le retrait de la note dans les titres
-      de pistes `.mkv` (`mkvpropedit` jamais exécuté).
+- [ ] **Retrait de la note** dans les titres de pistes `.mkv` (`mkvpropedit` jamais exécuté par les tests).
 - [ ] **Panneau de fusion de la fiche d'un film** : vérifier qu'il s'affiche dans la fenêtre des sous-titres.
 - [ ] **Tâche planifiée** : lui ajouter un déclencheur dans Emby et vérifier une exécution.
-- [ ] **Fusion en série** : aperçu sur une saison.
 - [ ] **Bilingue « par défaut »** : vérifier comment Emby le choisit face à une piste intégrée par défaut.
+- [ ] **Accents** : si des caractères du type « Ã© » apparaissent, le serveur sert la page dans un autre
+      encodage : le signaler.
 - [ ] Refaire les fusions des 5 films dont l'ancien bilingue a été retiré (Manhunter, Mission impossible 2,
-      Les Deux Tours, King of New York, Sex and the City S01E10).
+      Les Deux Tours, King of New York, Sex and the City S01E10) ; la fusion en série peut s'en charger.
 
 ## Reste à faire
 
 - [ ] **Clé API Emby à révoquer** : une clé du serveur Emby du PC a été publiée dans l'historique git
       (`MergeService.cs`, `SubtitleMerger.html`). Les fichiers sont corrigés ou retirés, mais l'historique
       la contient toujours : la supprimer dans Emby (Tableau de bord, Clés API).
-- [ ] Fusionner la branche dans `main` une fois la version validée sur le NAS.
-- [x] Accents dans les textes de la page (9.14.0). Si des caractères du type « Ã© » apparaissent, le serveur sert la page dans un autre encodage : le signaler.
-- [x] Outil de renommage des anciens `.dual.srt` retiré (9.13.0) : il n'y avait plus rien à renommer.
+- [ ] Fusionner la branche dans `main` et pousser sur GitHub (attend l'accord de l'utilisateur : dépôt public).
 - [ ] Captures d'écran du README à refaire (elles montrent l'ancienne page).
 - [ ] Moteur de traduction gratuit de meilleure qualité (Gemini, palier gratuit avec clé) si Google
       Traduction ne suffit pas.
@@ -59,7 +59,8 @@ presque rien de ce qui suit n'a encore tourné dans le vrai Emby.
       une seule lecture de la vidéo par normalisation, tâche planifiée.
 - [x] Nettoyage par film ou pour toutes les médiathèques.
 - [x] Fusion et traduction en tâche de fond, annulation, normalisation à la volée des pistes ASS.
-- [x] Fusion en série, panneau de la fiche d'un film, page en onglets, thème clair.
+- [x] Fusion en série, avec traduction automatique des langues absentes ; panneau de la fiche d'un film,
+      page en onglets, thème clair, accents.
 - [x] Adresses du plugin réservées aux administrateurs ; plus de clé ni d'adresse écrite en dur.
 - [x] README à jour.
 
