@@ -1,7 +1,7 @@
 define([], function () {
     'use strict';
 
-    console.log('[SubMerger] Module loaded v9.16.0');
+    console.log('[SubMerger] Module loaded v9.17.0');
 
     var allMovies = [];      // Tous les medias charges
     var filteredMovies = []; // Medias filtres
@@ -1080,8 +1080,18 @@ define([], function () {
             normalizeTarget = target || 'tab';
 
             var batch = normalizeTarget === 'batch';
-            var wholeLibrary = normalizeTarget === 'library'
-                || view.querySelector(batch ? '#batchScope' : '#normalizeScope').value === 'all';
+            var scope = normalizeTarget === 'library' ? 'all' : view.querySelector(batch ? '#batchScope' : '#normalizeScope').value;
+
+            // Une seule médiathèque : celle de la liste en haut de la page
+            var librarySelect = view.querySelector('#libraryFilter');
+            var oneLibrary = scope === 'library';
+            if (oneLibrary && !librarySelect.value) {
+                normalizeUi(view, 'result').innerHTML = statusBox('warning', 'Choisissez d\'abord une médiathèque dans la liste en haut de la page (pas "Toutes les médiathèques").');
+                return;
+            }
+
+            // wholeLibrary : le traitement ne porte pas sur un film précis
+            var wholeLibrary = scope === 'all' || oneLibrary;
             if (!wholeLibrary && !currentMovie) {
                 normalizeUi(view, 'result').innerHTML = statusBox('warning', 'Sélectionnez d\'abord un film ou un épisode, ou choisissez "Toutes les médiathèques".');
                 return;
@@ -1112,6 +1122,10 @@ define([], function () {
                     Languages: view.querySelector('#normalizeLanguages').value,
                     Overwrite: view.querySelector('#normalizeOverwrite').checked
                 };
+            }
+            if (oneLibrary) {
+                body.LibraryId = librarySelect.value;
+                body.LibraryName = librarySelect.options[librarySelect.selectedIndex].textContent;
             }
             preview = { body: body, itemId: wholeLibrary ? null : currentMovie.Id, target: normalizeTarget };
         } else {
@@ -1360,7 +1374,7 @@ define([], function () {
         ['#normalizeScope', '#normalizeLanguages', '#normalizeOverwrite',
             '#cleanupConversions', '#cleanupBilingual', '#cleanupNote',
             '#libCleanupConversions', '#libCleanupBilingual', '#libCleanupNote',
-            '#batchLang1', '#batchLang2', '#batchScope', '#batchTranslate', '#layout', '#mergeMode', '#mergeDefault',
+            '#batchLang1', '#batchLang2', '#batchScope', '#batchTranslate', '#libraryFilter', '#layout', '#mergeMode', '#mergeDefault',
             '#moviesSelect', '#versionSelect'].forEach(function (selector) {
             on(selector, 'change', function () { invalidateNormalizePreview(view); });
             on(selector, 'input', function () { invalidateNormalizePreview(view); });
@@ -1380,7 +1394,7 @@ define([], function () {
     }
 
     return function (view) {
-        console.log('[SubMerger] Controller init v9.16.0');
+        console.log('[SubMerger] Controller init v9.17.0');
 
         var bound = false;
 

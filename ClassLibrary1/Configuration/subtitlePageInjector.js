@@ -5,7 +5,7 @@
 (function() {
     'use strict';
 
-    console.log('[SubMerger] UI Injector loaded v9.16.0');
+    console.log('[SubMerger] UI Injector loaded v9.17.0');
 
     var INJECTOR_ID = 'subtitleMergerSection';
     var currentItemId = null;

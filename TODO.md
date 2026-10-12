@@ -1,11 +1,11 @@
 # À faire
 
-État au 12/10/2026, version 9.16.0. Tout le code est commité sur la branche
+État au 12/10/2026, version 9.17.0. Tout le code est commité sur la branche
 `feature/traduction-nommage-disposition`, fusionnée dans `main` et poussée sur GitHub.
 
 L'utilisateur a confirmé sur le NAS, sans détailler : le plugin se charge (tâche planifiée et
 authentification comprises) et le nettoyage fonctionne, y compris celui des bilingues (9.15.1).
-La version installée sur le NAS est la 9.15.1 (constaté le 12/10/2026) : la 9.16.0 reste à installer.
+La version installée sur le NAS est la 9.15.1 (constaté le 12/10/2026) : la 9.17.0 reste à installer.
 
 ## À vérifier sur le NAS (par l'utilisateur)
 

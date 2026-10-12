@@ -16,7 +16,28 @@ namespace EmbySubtitleMerger.Subtitles
     {
         public static List<string> All(ILibraryManager libraryManager)
         {
-            return libraryManager.GetVirtualFolders()
+            return Of(libraryManager, null, null)!;
+        }
+
+        /// <summary>
+        /// Dossiers d'une seule médiathèque, désignée par son identifiant Emby ou à défaut par son nom.
+        /// Sans identifiant ni nom : toutes les médiathèques. Null si la médiathèque demandée n'existe pas.
+        /// </summary>
+        public static List<string>? Of(ILibraryManager libraryManager, string? libraryId, string? libraryName)
+        {
+            var libraries = libraryManager.GetVirtualFolders().AsEnumerable();
+
+            if (!string.IsNullOrWhiteSpace(libraryId) || !string.IsNullOrWhiteSpace(libraryName))
+            {
+                var byId = libraries.Where(f => !string.IsNullOrWhiteSpace(libraryId) && string.Equals(f.ItemId, libraryId, StringComparison.OrdinalIgnoreCase)).ToList();
+                libraries = byId.Count > 0
+                    ? byId
+                    : libraries.Where(f => !string.IsNullOrWhiteSpace(libraryName) && string.Equals(f.Name, libraryName, StringComparison.OrdinalIgnoreCase)).ToList();
+
+                if (!libraries.Any()) return null;
+            }
+
+            return libraries
                 .SelectMany(f => f.Locations ?? Array.Empty<string>())
                 .Where(Directory.Exists)
                 .Distinct(StringComparer.OrdinalIgnoreCase)
@@ -52,8 +73,14 @@ namespace EmbySubtitleMerger.Subtitles
         /// <summary>true (défaut) = aperçu, rien n'est modifié</summary>
         public bool DryRun { get; set; } = true;
 
-        /// <summary>Limite le traitement à cette vidéo. Vide = toutes les médiathèques</summary>
+        /// <summary>Limite le traitement à cette vidéo. Vide = toutes les médiathèques, ou celle désignée ci-dessous</summary>
         public string? VideoPath { get; set; }
+
+        /// <summary>Sans VideoPath : limite le traitement à cette médiathèque (identifiant Emby)</summary>
+        public string? LibraryId { get; set; }
+
+        /// <summary>Nom de la médiathèque, utilisé si l'identifiant n'est pas reconnu</summary>
+        public string? LibraryName { get; set; }
 
         /// <summary>Langues à convertir, séparées par des virgules (ex: "en, fr, ru")</summary>
         public string? Languages { get; set; }
@@ -282,7 +309,11 @@ namespace EmbySubtitleMerger.Subtitles
                     plugin.SaveConfiguration();
                 }
 
-                var folders = options.VideoPath == null ? LibraryFolders.All(_libraryManager) : new List<string>();
+                var folders = options.VideoPath == null
+                    ? LibraryFolders.Of(_libraryManager, request.LibraryId, request.LibraryName)
+                    : new List<string>();
+                if (folders == null)
+                    return Fail("Médiathèque introuvable sur le serveur.");
                 var job = JobStore<NormalizeJob>.Add(new NormalizeJob { DryRun = options.DryRun, Cleanup = options.Cleanup, BatchMerge = options.BatchMerge });
 
                 Plugin.Log($"[Normalize] Job {job.Id}: {(options.BatchMerge ? "fusion en série" : options.Cleanup ? "nettoyage" : "normalisation")} ({(options.DryRun ? "aperçu" : "exécution")}), "
