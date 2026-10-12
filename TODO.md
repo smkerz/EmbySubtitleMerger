@@ -5,7 +5,7 @@
 
 L'utilisateur a confirmé sur le NAS, sans détailler : le plugin se charge (tâche planifiée et
 authentification comprises) et le nettoyage fonctionne, y compris celui des bilingues (9.15.1).
-La 9.16.0 est installée et fonctionne (retour du 12/10/2026, sans détail des fonctions essayées).
+La version installée sur le NAS est la 9.15.1 (constaté le 12/10/2026) : la 9.16.0 reste à installer.
 
 ## À vérifier sur le NAS (par l'utilisateur)
 
