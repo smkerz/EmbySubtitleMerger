@@ -26,9 +26,8 @@ La 9.16.0 est installée et fonctionne (retour du 12/10/2026, sans détail des f
 
 ## Reste à faire
 
-- [ ] **Clé API Emby à révoquer** : une clé du serveur Emby du PC a été publiée dans l'historique git
-      (`MergeService.cs`, `SubtitleMerger.html`). Les fichiers sont corrigés ou retirés, mais l'historique
-      la contient toujours : la supprimer dans Emby (Tableau de bord, Clés API).
+- [x] **Clé API Emby publiée dans l'historique git** : sans objet. Elle appartenait au serveur Emby du PC,
+      qui n'existe plus (confirmé par l'utilisateur le 12/10/2026) ; le seul serveur est celui du Synology.
 - [ ] Fusionner la branche dans `main` et pousser sur GitHub (attend l'accord de l'utilisateur : dépôt public).
 - [ ] Captures d'écran du README à refaire (elles montrent l'ancienne page).
 - [ ] Moteur de traduction gratuit de meilleure qualité (Gemini, palier gratuit avec clé) si Google
